@@ -1571,6 +1571,13 @@ ${historySummary}
                     if (item.assistant) addMessage(item.assistant, 'assistant');
                 });
             }
+            const savedApiKey = localStorage.getItem('doubao_api_key');
+            if (!savedApiKey) {
+                document.getElementById('security-btn').click();
+                setTimeout(() => {
+                    document.getElementById('doubao-api-key').focus();
+                }, 300);
+            }
         });
     </script>
 </body>

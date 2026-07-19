@@ -1,0 +1,1577 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>港口码头管理方案生成助手</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+    <script src="desensitization_proxy.js"></script>
+    <script src="desensitize.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; background: linear-gradient(135deg, #0c1445 0%, #1a237e 50%, #283593 100%); min-height: 100vh; display: flex; }
+        .sidebar { width: 220px; background: rgba(0,0,0,0.3); backdrop-filter: blur(10px); padding: 20px; color: white; border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; }
+        .sidebar h3 { font-size: 16px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.2); }
+        .sidebar .quick-btn { padding: 14px 16px; margin-bottom: 10px; border-radius: 10px; cursor: pointer; transition: all 0.3s ease; display: flex; align-items: center; gap: 10px; font-size: 14px; border: none; color: white; }
+        .sidebar .quick-btn.financial { background: linear-gradient(135deg, #42a5f5, #1e88e5); }
+        .sidebar .quick-btn.financial:hover { background: linear-gradient(135deg, #1e88e5, #1565c0); transform: translateX(5px); }
+        .sidebar .quick-btn.safety { background: linear-gradient(135deg, #66bb6a, #43a047); }
+        .sidebar .quick-btn.safety:hover { background: linear-gradient(135deg, #43a047, #2e7d32); transform: translateX(5px); }
+        .sidebar .quick-btn.history { background: linear-gradient(135deg, #ffa726, #fb8c00); }
+        .sidebar .quick-btn.history:hover { background: linear-gradient(135deg, #fb8c00, #f57c00); transform: translateX(5px); }
+        .main-content { flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+        .header { padding: 20px 30px; background: rgba(0,0,0,0.2); backdrop-filter: blur(10px); color: white; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .header h1 { font-size: 22px; font-weight: 600; }
+        .header .model-info { font-size: 14px; color: rgba(255,255,255,0.7); }
+        .chat-container { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 30px; display: flex; flex-direction: column; gap: 20px; }
+        .chat-messages::-webkit-scrollbar { width: 6px; }
+        .chat-messages::-webkit-scrollbar-track { background: rgba(255,255,255,0.1); }
+        .chat-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 3px; }
+        .message { display: flex; gap: 12px; max-width: 80%; }
+        .message.user { margin-left: auto; flex-direction: row-reverse; }
+        .message.assistant { margin-right: auto; }
+        .message .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+        .message.user .avatar { background: linear-gradient(135deg, #42a5f5, #1e88e5); }
+        .message.assistant .avatar { background: linear-gradient(135deg, #66bb6a, #43a047); }
+        .message .message-content { padding: 15px 20px; border-radius: 18px; line-height: 1.6; font-size: 15px; word-break: break-all; }
+        .message.user .message-content { background: linear-gradient(135deg, #42a5f5, #1e88e5); color: white; border-bottom-right-radius: 4px; }
+        .message.assistant .message-content { background: rgba(255,255,255,0.1); color: white; border-bottom-left-radius: 4px; }
+        .typing-indicator { display: flex; gap: 4px; padding: 10px; }
+        .typing-indicator span { width: 8px; height: 8px; background: #42a5f5; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+        .chat-input-area { padding: 20px 30px; background: rgba(0,0,0,0.2); backdrop-filter: blur(10px); border-top: 1px solid rgba(255,255,255,0.1); }
+        .input-container { display: flex; gap: 12px; background: rgba(255,255,255,0.1); border-radius: 25px; padding: 8px; border: 1px solid rgba(255,255,255,0.2); }
+        .input-container input[type="text"] { flex: 1; background: transparent; border: none; outline: none; padding: 12px 20px; color: white; font-size: 15px; }
+        .input-container input[type="text"]::placeholder { color: rgba(255,255,255,0.5); }
+        .input-container button { padding: 12px 24px; border: none; border-radius: 20px; cursor: pointer; font-size: 15px; font-weight: 600; transition: all 0.3s ease; }
+        .input-container .upload-btn { background: rgba(255,255,255,0.1); color: white; padding: 12px 16px; }
+        .input-container .upload-btn:hover { background: rgba(255,255,255,0.2); }
+        .input-container .send-btn { background: linear-gradient(135deg, #42a5f5, #1e88e5); color: white; }
+        .input-container .send-btn:hover { background: linear-gradient(135deg, #1e88e5, #1565c0); }
+        .input-container .send-btn:disabled { background: rgba(255,255,255,0.2); cursor: not-allowed; }
+        .desensitize-toggle { display: flex; align-items: center; cursor: pointer; margin-right: 10px; }
+        .desensitize-toggle input[type="checkbox"] { display: none; }
+        .toggle-slider { width: 40px; height: 20px; background: #4a5568; border-radius: 10px; position: relative; transition: background 0.3s; }
+        .toggle-slider::before { content: ''; position: absolute; width: 16px; height: 16px; background: white; border-radius: 50%; top: 2px; left: 2px; transition: transform 0.3s; }
+        .desensitize-toggle input[type="checkbox"]:checked + .toggle-slider { background: #68d391; }
+        .desensitize-toggle input[type="checkbox"]:checked + .toggle-slider::before { transform: translateX(20px); }
+        .toggle-label { margin-left: 8px; color: rgba(255,255,255,0.8); font-size: 14px; }
+        .security-section { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .security-section h3 { color: #68d391; margin-bottom: 10px; font-size: 15px; }
+        .security-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 8px; }
+        .security-item label { color: rgba(255,255,255,0.9); font-size: 14px; }
+        .security-item input[type="text"] { flex: 1; max-width: 200px; padding: 8px; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; background: rgba(0,0,0,0.3); color: white; font-size: 14px; }
+        .security-item input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+        .security-btn { padding: 10px 20px; margin-right: 10px; border: none; border-radius: 8px; background: linear-gradient(135deg, #42a5f5, #1e88e5); color: white; cursor: pointer; font-size: 14px; transition: all 0.3s; }
+        .security-btn:hover { background: linear-gradient(135deg, #1e88e5, #1565c0); }
+        #security-stats { color: rgba(255,255,255,0.8); font-size: 13px; line-height: 1.8; }
+        .download-section { margin-top: 10px; }
+        .toast-container { position: fixed; top: 80px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
+        .toast { padding: 12px 20px; border-radius: 8px; color: white; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); animation: slideIn 0.3s ease-out; max-width: 350px; }
+        .toast.success { background: linear-gradient(135deg, #68d391, #48bb78); }
+        .toast.warning { background: linear-gradient(135deg, #f6ad55, #ed8936); }
+        .toast.error { background: linear-gradient(135deg, #fc8181, #f56565); }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .download-btn { display: inline-block; padding: 8px 16px; background: #42a5f5; color: white; text-decoration: none; border-radius: 8px; font-size: 14px; transition: all 0.3s ease; }
+        .download-btn:hover { background: #1e88e5; }
+        .input-container input[type="file"] { display: none; }
+        pre { white-space: pre-wrap; margin: 0; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid rgba(255,255,255,0.2); padding: 8px; text-align: left; }
+        th { background: rgba(255,255,255,0.1); }
+        .privacy-banner { background: linear-gradient(135deg, #1e88e5, #42a5f5); padding: 12px 20px; color: white; font-size: 14px; text-align: center; }
+        .privacy-banner::before { content: '🔒 '; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(5px); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: linear-gradient(135deg, #1a237e, #283593); border-radius: 16px; padding: 25px; width: 90%; max-width: 800px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.2); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.2); }
+        .modal-header h2 { color: white; font-size: 18px; }
+        .modal-close { background: rgba(255,255,255,0.1); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; }
+        .modal-close:hover { background: rgba(255,255,255,0.2); }
+        .modal-search { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 10px 15px; margin-bottom: 15px; }
+        .modal-search input { background: transparent; border: none; color: white; width: 100%; outline: none; font-size: 14px; }
+        .modal-search input::placeholder { color: rgba(255,255,255,0.5); }
+        .modal-content { flex: 1; overflow-y: auto; }
+        .history-item { padding: 15px; background: rgba(255,255,255,0.05); border-radius: 10px; margin-bottom: 10px; }
+        .history-item .role { font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 5px; }
+        .history-item .content { color: white; font-size: 14px; line-height: 1.5; }
+        .history-item .content.highlight { background: rgba(255,255,0,0.3); padding: 2px 4px; border-radius: 3px; }
+        .history-item .time { font-size: 12px; color: rgba(255,255,255,0.4); margin-top: 8px; }
+        .category-tabs { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+        .category-tab { padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.8); background: transparent; transition: all 0.3s ease; }
+        .category-tab.active { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.5); color: white; }
+        .no-results { text-align: center; color: rgba(255,255,255,0.5); padding: 40px; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h3>⚡ 快捷功能</h3>
+        <button class="quick-btn financial" onclick="generateAnnualFinancialReport()">📊 年度财务整合</button>
+        <button class="quick-btn safety" onclick="generateSafetyImprovementPlan()">🛡️ 安全生产方案</button>
+        <button class="quick-btn history" onclick="openHistoryModal()">📋 聊天记录</button>
+        <button class="quick-btn security" onclick="openSecurityModal()">🔐 安全设置</button>
+    </div>
+    
+    <div class="main-content">
+        <div class="privacy-banner">🔒 数据安全保障：您的文件和消息中的敏感信息（手机号、身份证、金额、公司名称等）在展示时已自动脱敏处理，保护您的数据安全。</div>
+        <div class="header">
+            <h1>🚢 港口码头管理方案生成助手</h1>
+            <div class="model-info">接入豆包大模型</div>
+        </div>
+        
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages">
+                <div class="message assistant">
+                    <div class="avatar">🤖</div>
+                    <div class="message-content">
+                        <p>您好！我是您的港口码头管理智能助手。</p>
+                        <p>您可以直接用自然语言和我交流，比如：</p>
+                        <ul>
+                            <li>"帮我制定一份吊机司机的招聘方案"</li>
+                            <li>"新来的实习生性格比较内向，帮我安排一下"</li>
+                            <li>"生成一份叉车安全操作规程"</li>
+                            <li>"帮我分析一下这个月的财务数据"</li>
+                            <li>"上传了一张发票图片，请识别一下"</li>
+                        </ul>
+                        <p>如果信息不全，我会主动询问您。请直接告诉我您的需求！</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-input-area">
+                <div class="input-container">
+                    <button class="upload-btn" id="upload-btn">📁 上传文件</button>
+                    <input type="file" id="file-input" accept=".xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.txt,.jpg,.jpeg,.png,.gif,.bmp,.webp">
+                    <input type="text" id="user-input" placeholder="请输入您的问题..." autocomplete="off">
+                    <button class="send-btn" id="send-btn">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal-overlay" id="history-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>📋 聊天记录</h2>
+                <button class="modal-close" onclick="closeHistoryModal()">×</button>
+            </div>
+            <div class="category-tabs">
+                <button class="category-tab active" onclick="filterHistory('all')">全部</button>
+                <button class="category-tab" onclick="filterHistory('financial')">财务相关</button>
+                <button class="category-tab" onclick="filterHistory('safety')">安全相关</button>
+                <button class="category-tab" onclick="filterHistory('hr')">人事相关</button>
+                <button class="category-tab" onclick="filterHistory('other')">其他</button>
+            </div>
+            <div class="modal-search">
+                <input type="text" id="history-search" placeholder="搜索关键字..." oninput="searchHistory()">
+            </div>
+            <div class="modal-content" id="history-content">
+            </div>
+        </div>
+    </div>
+    
+    <div class="toast-container" id="toast-container"></div>
+    
+    <div class="modal-overlay" id="security-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>🔐 数据安全</h2>
+                <button class="modal-close" onclick="closeSecurityModal()">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="security-section">
+                    <h3>🔑 API密钥配置</h3>
+                    <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 12px;">请输入您的豆包API密钥，密钥仅保存在浏览器本地，不会上传到云端。</p>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <input type="password" id="doubao-api-key" placeholder="输入豆包API密钥 (ark-xxx)" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.3); color: white; font-family: monospace;">
+                        <button class="security-btn" onclick="saveApiKey()" style="margin-top: 5px;">💾 保存密钥</button>
+                        <button class="security-btn" onclick="clearApiKey()" style="margin-top: 5px;">🗑️ 清除密钥</button>
+                    </div>
+                    <div id="api-key-status" style="margin-top: 10px; font-size: 12px; color: rgba(255,255,255,0.6);"></div>
+                </div>
+                <div class="security-section">
+                    <h3>安全机制</h3>
+                    <p style="color: rgba(255,255,255,0.8); font-size: 14px; line-height: 1.8;">
+                        • 系统会自动检测发送内容中的隐私信息<br>
+                        • 检测到隐私信息时自动进行脱敏处理<br>
+                        • 脱敏后的内容发送给AI，保护您的数据安全<br>
+                        • 系统会生成脱敏文件和密钥文件供您下载<br>
+                        • 密钥文件用于还原脱敏数据，请妥善保存<br>
+                        • API密钥仅保存在浏览器本地存储中
+                    </p>
+                </div>
+                <div class="security-section">
+                    <h3>🔄 数据还原</h3>
+                    <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 12px;">上传脱敏文件和对应的密钥文件，系统将自动还原为原始数据</p>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <div>
+                            <label style="font-size: 13px; color: rgba(255,255,255,0.8); display: block; margin-bottom: 5px;">📁 上传脱敏文件 (.txt)</label>
+                            <input type="file" id="restore-desensitized-file" accept=".txt" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.3); color: white;">
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; color: rgba(255,255,255,0.8); display: block; margin-bottom: 5px;">🔑 上传密钥文件 (.json)</label>
+                            <input type="file" id="restore-key-file" accept=".json" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.3); color: white;">
+                        </div>
+                        <button class="security-btn" onclick="restoreData()" style="margin-top: 5px;">开始还原</button>
+                    </div>
+                    <div id="restore-result" style="margin-top: 15px; padding: 10px; border-radius: 6px; background: rgba(0,0,0,0.3); display: none;"></div>
+                </div>
+                <div class="security-section">
+                    <h3>本地密钥映射管理</h3>
+                    <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 12px;">密钥映射自动保存在浏览器本地存储中，不会上传到云端。您可以查看和管理这些映射。</p>
+                    <button class="security-btn" onclick="viewStoredMappings()" style="margin-bottom: 10px;">📋 查看本地存储的密钥映射</button>
+                    <button class="security-btn" onclick="clearStoredMappings()">🗑️ 清除本地密钥映射</button>
+                    <div id="stored-mappings-list" style="margin-top: 15px; padding: 10px; border-radius: 6px; background: rgba(0,0,0,0.3); display: none; max-height: 200px; overflow-y: auto;"></div>
+                </div>
+                <div class="security-section">
+                    <h3>统计信息</h3>
+                    <div id="security-stats"></div>
+                </div>
+                <div class="security-section">
+                    <h3>操作</h3>
+                    <button class="security-btn" onclick="exportSecurityLogs()">导出日志</button>
+                    <button class="security-btn" onclick="clearSecurityLogs()">清除日志</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // API 配置已迁移至后端 /api/v1/chat/stream，前端不再硬编码 API Key
+        let chatHistory = loadChatHistory();
+        let uploadedFileContent = null;
+        let uploadedFileName = null;
+        let desensitizationMapping = {};
+        const messagesContainer = document.getElementById('chat-messages');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        let currentFilter = 'all';
+        let currentSearch = '';
+        
+        function loadChatHistory() {
+            try {
+                const stored = localStorage.getItem('port_chat_history');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    return parsed.slice(-50);
+                }
+            } catch (e) {
+                console.error('加载聊天记录失败:', e);
+            }
+            return [];
+        }
+        
+        function saveChatHistory() {
+            try {
+                const toSave = chatHistory.slice(-50);
+                localStorage.setItem('port_chat_history', JSON.stringify(toSave));
+            } catch (e) {
+                console.error('保存聊天记录失败:', e);
+            }
+        }
+        
+        function getFinancialHistory() {
+            const keywords = ['财务', '报表', '报销', '金额', '费用', '预算', '成本', '收入', '支出', '利润', '数据'];
+            return chatHistory.filter(item => {
+                const text = (item.user || item.assistant || '').toLowerCase();
+                return keywords.some(k => text.includes(k.toLowerCase()));
+            });
+        }
+        
+        function getSafetyHistory() {
+            const keywords = ['安全', '吊机', '叉车', '铲车', '装卸', '操作', '应急', '风险', '事故'];
+            return chatHistory.filter(item => {
+                const text = (item.user || item.assistant || '').toLowerCase();
+                return keywords.some(k => text.includes(k.toLowerCase()));
+            });
+        }
+        
+        function categorizeMessage(text) {
+            const financialKeywords = ['财务', '报表', '报销', '金额', '费用', '预算', '成本', '收入', '支出', '利润'];
+            const safetyKeywords = ['安全', '吊机', '叉车', '铲车', '装卸', '操作', '应急', '风险'];
+            const hrKeywords = ['人事', '招聘', '实习', '入职', '面试', '员工'];
+            
+            text = text.toLowerCase();
+            if (financialKeywords.some(k => text.includes(k.toLowerCase()))) return 'financial';
+            if (safetyKeywords.some(k => text.includes(k.toLowerCase()))) return 'safety';
+            if (hrKeywords.some(k => text.includes(k.toLowerCase()))) return 'hr';
+            return 'other';
+        }
+        const uploadBtn = document.getElementById('upload-btn');
+        const fileInput = document.getElementById('file-input');
+        
+        function displayDesensitize(text) {
+            text = text.replace(/1[3-9]\d{9}/g, function(match) {
+                return match.substring(0, 3) + '****' + match.substring(7);
+            });
+            
+            text = text.replace(/\d{17}[\dXx]/g, function(match) {
+                return match.substring(0, 4) + '***********' + match.substring(15);
+            });
+            
+            text = text.replace(/\d{16,19}/g, function(match) {
+                if (!/^1[3-9]\d{9}$/.test(match)) {
+                    return match.substring(0, 4) + '********' + match.substring(match.length - 4);
+                }
+                return match;
+            });
+            
+            text = text.replace(/(¥|￥)?(\d{1,3}(,\d{3})*(\.\d{2})?)\s*元/g, function(match) {
+                return '[已脱敏金额]';
+            });
+            
+            text = text.replace(/([\u4e00-\u9fa5]{2,8})(集团|公司|有限公司|股份|控股|有限责任)/g, function(match) {
+                return '[已脱敏公司名称]';
+            });
+            
+            text = text.replace(/\b([\u4e00-\u9fa5]{2,3})(先生|女士|经理|总)\b/g, function(match) {
+                if (!match.includes('公司') && !match.includes('集团') && !match.includes('有限')) {
+                    return '[已脱敏姓名]';
+                }
+                return match;
+            });
+            
+            text = text.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, function(match) {
+                return '[已脱敏邮箱]';
+            });
+            
+            text = text.replace(/(微信号|微信|WeChat|wechat)\s*[:：]?\s*([a-zA-Z0-9_-]{5,})/g, function(match) {
+                return '[已脱敏微信号]';
+            });
+            
+            return text;
+        }
+        
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') sendMessage(); });
+        uploadBtn.addEventListener('click', function() { fileInput.click(); });
+        
+        fileInput.addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            addMessage('📁 正在上传文件: ' + file.name, 'user');
+            sendBtn.disabled = true;
+            try {
+                const content = await readFileContent(file);
+                uploadedFileContent = content;
+                uploadedFileName = file.name;
+
+                const safePreview = window.desensitizeFileData
+                    ? window.desensitizeFileData(content.length > 500 ? content.substring(0, 500) + '...（内容已截断，完整内容已自动脱敏处理）' : content, {
+                        maskPhone: true, maskIdCard: true, maskCompanyName: true,
+                        maskContractNo: true, maskFinanceAmount: false, maskBankCard: true,
+                        maskEmail: true, maskName: true, maskWechat: true,
+                        maskPassword: true, maskAccount: true
+                    })
+                    : (content.length > 500 ? content.substring(0, 500) + '...（内容已截断）' : content);
+                const previewContent = displayDesensitize(safePreview);
+
+                addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理，预览：\n```\n' + previewContent + '\n```\n\n您可以提问了。', 'assistant');
+            } catch (error) {
+                addMessage('❌ 文件上传失败：' + error.message + '\n请尝试将文件内容复制为文本后重新上传。', 'assistant');
+            } finally {
+                sendBtn.disabled = false;
+                fileInput.value = '';
+            }
+        });
+        
+        async function readFileContent(file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (ext === 'txt') return await readAsText(file);
+            if (ext === 'pdf') return await readPDF(file);
+            if (['docx', 'doc'].includes(ext)) return await readWord(file);
+            if (['xlsx', 'xls'].includes(ext)) return await readExcel(file);
+            if (['pptx', 'ppt'].includes(ext)) return await readPPT(file);
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) return await readImage(file);
+            return await readAsText(file);
+        }
+        
+        function readAsText(file) {
+            return new Promise(function(resolve, reject) {
+                const reader = new FileReader();
+                reader.onload = function(e) { resolve(e.target.result); };
+                reader.onerror = reject;
+                reader.readAsText(file, 'utf-8');
+            });
+        }
+        
+        async function readPDF(file) {
+            try {
+                const arrayBuffer = await new Promise(function(resolve, reject) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) { resolve(e.target.result); };
+                    reader.onerror = reject;
+                    reader.readAsArrayBuffer(file);
+                });
+                const data = new Uint8Array(arrayBuffer);
+                if (typeof pdfjsLib !== 'undefined') {
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                }
+                const doc = await pdfjsLib.getDocument({ data }).promise;
+                let text = '=== PDF文件: ' + file.name + ' ===\n';
+                for (let i = 1; i <= doc.numPages; i++) {
+                    const page = await doc.getPage(i);
+                    const content = await page.getTextContent();
+                    text += '\n--- 第 ' + i + ' 页 ---\n';
+                    text += content.items.map(function(item) { return item.str; }).join(' ');
+                }
+                return text.trim();
+            } catch (e) {
+                console.error('PDF parsing failed:', e);
+                return 'PDF文件内容（解析失败）\n文件名: ' + file.name + '\n大小: ' + file.size + '字节\n提示：请将PDF内容复制为文本后重新上传，或转为Word格式。';
+            }
+        }
+        
+        async function readWord(file) {
+            try {
+                const arrayBuffer = await new Promise(function(resolve, reject) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) { resolve(e.target.result); };
+                    reader.onerror = reject;
+                    reader.readAsArrayBuffer(file);
+                });
+                const zip = new JSZip();
+                await zip.loadAsync(arrayBuffer);
+                if (zip.files['word/document.xml']) {
+                    const xmlContent = await zip.file('word/document.xml').async('string');
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(xmlContent, 'application/xml');
+                    const textNodes = doc.evaluate('//text()', doc, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+                    let text = '';
+                    let node;
+                    while ((node = textNodes.iterateNext())) {
+                        text += node.textContent + '\n';
+                    }
+                    return text.replace(/\n+/g, '\n').trim();
+                }
+                return 'Word文件内容\n文件名: ' + file.name + '\n提示：部分Word格式可能无法完全解析，请复制文本内容重新上传。';
+            } catch (e) {
+                console.error('Word parsing failed:', e);
+                return await readAsText(file);
+            }
+        }
+        
+        async function readExcel(file) {
+            try {
+                const arrayBuffer = await new Promise(function(resolve, reject) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) { resolve(e.target.result); };
+                    reader.onerror = reject;
+                    reader.readAsArrayBuffer(file);
+                });
+                const data = new Uint8Array(arrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+                let text = '';
+                workbook.SheetNames.forEach(function(sheetName) {
+                    text += '=== Sheet: ' + sheetName + ' ===\n';
+                    const sheet = workbook.Sheets[sheetName];
+                    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                    json.forEach(function(row) {
+                        text += row.join('\t') + '\n';
+                    });
+                    text += '\n';
+                });
+                return text;
+            } catch (e) {
+                console.error('Excel parsing failed:', e);
+                return 'Excel文件内容（解析失败）\n文件名: ' + file.name + '\n大小: ' + file.size + '字节\n提示：请将Excel内容复制为文本后重新上传，或另存为CSV格式。';
+            }
+        }
+        
+        async function readPPT(file) {
+            try {
+                const arrayBuffer = await new Promise(function(resolve, reject) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) { resolve(e.target.result); };
+                    reader.onerror = reject;
+                    reader.readAsArrayBuffer(file);
+                });
+                const zip = new JSZip();
+                await zip.loadAsync(arrayBuffer);
+                let text = '=== PPT文件: ' + file.name + ' ===\n';
+                const slideRegex = /^ppt\/slides\/slide\d+\.xml$/;
+                const slideFiles = Object.keys(zip.files).filter(function(name) { return slideRegex.test(name); });
+                slideFiles.sort(function(a, b) {
+                    const numA = parseInt(a.match(/slide(\d+)/)[1]);
+                    const numB = parseInt(b.match(/slide(\d+)/)[1]);
+                    return numA - numB;
+                });
+                for (let i = 0; i < slideFiles.length; i++) {
+                    const slideFile = slideFiles[i];
+                    const xmlContent = await zip.file(slideFile).async('string');
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(xmlContent, 'application/xml');
+                    const textNodes = doc.evaluate('//text()', doc, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+                    let slideText = '';
+                    let node;
+                    while ((node = textNodes.iterateNext())) {
+                        slideText += node.textContent + '\n';
+                    }
+                    const slideNum = slideFile.match(/slide(\d+)/)[1];
+                    text += '\n--- 幻灯片 ' + slideNum + ' ---\n';
+                    text += slideText.replace(/\n+/g, '\n').trim() || '(空白幻灯片)';
+                    text += '\n';
+                }
+                return text.trim();
+            } catch (e) {
+                console.error('PPT parsing failed:', e);
+                return 'PPT文件内容（解析失败）\n文件名: ' + file.name + '\n大小: ' + file.size + '字节\n提示：请将PPT转为PDF后重新上传，或复制文本内容重新上传。';
+            }
+        }
+        
+        function classifyImageContent(text) {
+            const categories = {
+                '财务票据': ['发票', '收据', '报销', '金额', '费用', '付款', '收款', '凭证', '票据'],
+                '安全文档': ['安全', '操作规程', '应急预案', '风险', '隐患', '事故', '防护', '吊机', '叉车', '铲车', '装卸'],
+                '人事资料': ['简历', '面试', '招聘', '入职', '实习', '培训', '考核', '工资', '薪酬'],
+                '合同协议': ['合同', '协议', '条款', '签署', '甲方', '乙方'],
+                '物流单据': ['提单', '报关', '运单', '装箱单', '货物', '集装箱', '船名', '航次'],
+                '行政通知': ['通知', '公告', '规定', '制度', '办法', '要求']
+            };
+            
+            const textLower = text.toLowerCase();
+            
+            for (const [category, keywords] of Object.entries(categories)) {
+                for (const keyword of keywords) {
+                    if (textLower.includes(keyword.toLowerCase())) {
+                        return category;
+                    }
+                }
+            }
+            
+            return '其他';
+        }
+        
+        function compressImageFile(file, maxWidth = 1000) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        let width = img.width;
+                        let height = img.height;
+                        
+                        if (width > maxWidth) {
+                            height = Math.round((height * maxWidth) / width);
+                            width = maxWidth;
+                        }
+                        
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        
+                        canvas.toBlob((blob) => {
+                            resolve(blob);
+                        }, 'image/jpeg', 0.8);
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+        
+        async function readImage(file) {
+            try {
+                const compressedFile = await compressImageFile(file, 1000);
+                
+                const { createWorker } = Tesseract;
+                const worker = await createWorker('chi_sim');
+                await worker.loadLanguage('chi_sim');
+                await worker.initialize('chi_sim');
+                
+                const { data: { text } } = await worker.recognize(compressedFile);
+                await worker.terminate();
+                
+                const category = classifyImageContent(text);
+                
+                return '=== 图片识别结果: ' + file.name + ' ===\n分类：' + category + '\n\n' + text.trim();
+            } catch (e) {
+                console.error('图片识别失败:', e);
+                return '图片文件内容（识别失败）\n文件名: ' + file.name + '\n大小: ' + file.size + '字节\n提示：请手动描述图片内容，或复制图片中的文字重新上传。';
+            }
+        }
+        
+        async function desensitizeContent(content) {
+            if (!content) return content;
+            
+            desensitizationProxy.reset();
+            
+            let desensitizedContent = content;
+            if (window.desensitizeFileData) {
+                desensitizedContent = window.desensitizeFileData(content, {
+                    maskPhone: true,
+                    maskIdCard: true,
+                    maskCompanyName: true,
+                    maskContractNo: true,
+                    maskFinanceAmount: false,
+                    maskBankCard: true,
+                    maskEmail: true,
+                    maskName: true,
+                    maskWechat: true,
+                    maskPassword: true,
+                    maskAccount: true
+                });
+            }
+            
+            desensitizationProxy.desensitize(desensitizedContent);
+            const mapping = desensitizationProxy.getMapping();
+            
+            return { desensitizedContent, mapping };
+        }
+
+        async function sendMessage(isQuickAction = false) {
+            const text = userInput.value.trim();
+            if (!text && !uploadedFileContent) return;
+            
+            const isDesensitizeEnabled = true;
+            
+            let desensitizedText = text;
+            let desensitizedFileContent = uploadedFileContent;
+            let currentMapping = null;
+            
+            if (isDesensitizeEnabled) {
+                if (text) {
+                    const result = await desensitizeContent(text);
+                    desensitizedText = result.desensitizedContent;
+                    currentMapping = result.mapping;
+                }
+                if (uploadedFileContent) {
+                    const truncatedContent = truncateContent(uploadedFileContent, 3000);
+                    const result = await desensitizeContent(truncatedContent);
+                    desensitizedFileContent = result.desensitizedContent;
+                    if (currentMapping) {
+                        Object.assign(currentMapping, result.mapping);
+                    } else {
+                        currentMapping = result.mapping;
+                    }
+                }
+            }
+            
+            addMessage(text, 'user', null, isDesensitizeEnabled);
+            userInput.value = '';
+            sendBtn.disabled = true;
+            removeTypingIndicator();
+            
+            const streamMessageDiv = document.createElement('div');
+            streamMessageDiv.className = 'message assistant streaming';
+            
+            const avatarDiv = document.createElement('div');
+            avatarDiv.className = 'avatar';
+            avatarDiv.textContent = '🤖';
+            
+            const streamContent = document.createElement('div');
+            streamContent.className = 'message-content';
+            
+            streamMessageDiv.appendChild(avatarDiv);
+            streamMessageDiv.appendChild(streamContent);
+            messagesContainer.appendChild(streamMessageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            let fullResponse = '';
+            let renderInterval = null;
+            let pendingRender = false;
+            
+            try {
+                const result = await callDeepSeekAPI(desensitizedText, isQuickAction, isDesensitizeEnabled, null, desensitizedFileContent);
+                const body = result.body;
+                
+                const reader = body.getReader();
+                const decoder = new TextDecoder();
+                
+                const renderContent = () => {
+                    if (!pendingRender) return;
+                    pendingRender = false;
+                    let displayContent = fullResponse;
+                    streamContent.innerHTML = displayDesensitize(marked.parse(displayContent));
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                };
+                
+                renderInterval = setInterval(renderContent, 30);
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.substring(6).trim();
+                            if (data === '[DONE]') continue;
+                            try {
+                                const json = JSON.parse(data);
+                                const content = json.choices?.[0]?.delta?.content || '';
+                                if (content) {
+                                    fullResponse += content;
+                                    pendingRender = true;
+                                }
+                            } catch (e) {
+                                console.warn('解析流式响应失败:', e);
+                            }
+                        }
+                    }
+                }
+                
+                clearInterval(renderInterval);
+                
+                let restoredResponse = fullResponse;
+                if (isDesensitizeEnabled && currentMapping && Object.keys(currentMapping).length > 0) {
+                    try {
+                        restoredResponse = desensitizationProxy.restoreWithKey(fullResponse, currentMapping);
+                        console.log('[INFO] 数据还原完成，还原前长度:', fullResponse.length, '还原后长度:', restoredResponse.length);
+                    } catch (e) {
+                        console.warn('[WARN] 数据还原失败:', e);
+                        restoredResponse = fullResponse;
+                    }
+                }
+                
+                streamContent.innerHTML = displayDesensitize(marked.parse(restoredResponse));
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                
+                chatHistory.push({ user: text, assistant: restoredResponse, timestamp: Date.now() });
+                saveChatHistory();
+                
+                streamMessageDiv.classList.remove('streaming');
+                
+                if (isDesensitizeEnabled && currentMapping && Object.keys(currentMapping).length > 0) {
+                    const desensitizedFileName = generateDesensitizedFile(text, uploadedFileContent || '', currentMapping);
+                    const keyFileName = generateKeyFile(currentMapping);
+                    
+                    if (desensitizedFileName || keyFileName) {
+                        const downloadSection = document.createElement('div');
+                        downloadSection.className = 'download-section';
+                        let html = '';
+                        if (desensitizedFileName) {
+                            html += `<a href="#" onclick="downloadDesensitizedFile('${desensitizedFileName}')" class="download-btn">📥 下载脱敏文件</a> `;
+                        }
+                        if (keyFileName) {
+                            html += `<a href="#" onclick="downloadKeyFile('${keyFileName}')" class="download-btn">🔑 下载密钥文件</a>`;
+                        }
+                        downloadSection.innerHTML = html;
+                        streamContent.appendChild(downloadSection);
+                    }
+                }
+                
+                const hasTableOrFinance = restoredResponse.includes('|') || 
+                                          restoredResponse.includes('序号') || 
+                                          restoredResponse.includes('金额') || 
+                                          restoredResponse.includes('费用') ||
+                                          restoredResponse.includes('单据基础信息') ||
+                                          restoredResponse.includes('核心费用明细') ||
+                                          restoredResponse.includes('合计汇总');
+                if (hasTableOrFinance) {
+                    const downloadFileName = generateExcelFile(restoredResponse);
+                    if (downloadFileName) {
+                        const downloadSection = document.createElement('div');
+                        downloadSection.className = 'download-section';
+                        downloadSection.innerHTML = '<a href="#" onclick="downloadExcel(\'' + downloadFileName + '\')" class="download-btn">📥 下载Excel表格</a>';
+                        streamContent.appendChild(downloadSection);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('发送消息失败:', error);
+                streamContent.innerHTML = '❌ 发生错误：' + error.message;
+                streamMessageDiv.classList.remove('streaming');
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+        
+        const FORMAT_TEMPLATES = {
+            finance: `\n\n请按照以下财务单据格式输出：\n\n### 1. 单据基础信息区\n单据编号：XXX\n单据日期：YYYY-MM-DD\n审批人：XXX\n归属部门：XXX\n填报人：XXX\n填报日期：YYYY-MM-DD\n\n### 2. 核心费用明细区\n| 序号 | 费用事由 | 金额（元） | 支付方式 | 备注 |\n| --- | --- | --- | --- | --- |\n| 1 | 事由1 | 金额1 | 支付方式1 | 备注1 |\n\n### 3. 合计汇总区\n小写金额：￥XXX.XX元\n大写金额：XXX元整\n\n### 4. 异常备注区\n无异常`,
+            
+            hr_recruitment: `\n\n请按照以下人事招收方案格式输出：\n\n### 1. 岗位需求分析区\n岗位名称：XXX\n岗位类别：[管理岗/技术岗/操作岗/后勤岗]\n需求人数：X人\n岗位职责：XXX\n任职要求：XXX\n\n### 2. 招聘流程区\n| 招聘阶段 | 时间安排 | 主要任务 |\n| --- | --- | --- |\n| 简历筛选 | 第1-3天 | 筛选符合条件的简历 |\n| 面试评估 | 第4-7天 | 进行初试和复试 |\n| 录用通知 | 第8天 | 发放录用通知 |\n| 入职培训 | 第9-14天 | 进行岗前培训 |\n\n### 3. 面试评估标准区\n| 评估维度 | 权重 | 评分标准 |\n| --- | --- | --- |\n| 专业技能 | 30% | 相关工作经验和专业知识 |\n| 综合素质 | 25% | 沟通能力、团队协作、责任心 |\n| 岗位匹配度 | 25% | 性格特点与岗位要求的匹配程度 |\n| 发展潜力 | 20% | 学习能力和职业发展潜力 |\n\n### 4. 备注区\n备注信息：XXX`,
+            
+            internship: `\n\n请按照以下实习方案格式输出：\n\n### 1. 实习生基本信息区\n姓名：XXX\n专业：XXX\n性格特点：XXX\n实习岗位：XXX\n实习周期：XXX\n\n### 2. 岗位匹配分析区\n性格特点分析：XXX\n推荐岗位：XXX\n匹配理由：XXX\n\n### 3. 培训计划区\n| 阶段 | 时间 | 培训内容 |\n| --- | --- | --- |\n| 第一阶段 | 第1-2周 | 公司概况、安全培训、岗位认知 |\n| 第二阶段 | 第3-4周 | 专业技能培训、导师带教 |\n| 第三阶段 | 第5-8周 | 独立工作实践、项目参与 |\n\n### 4. 考核标准区\n| 考核维度 | 权重 | 考核方式 |\n| --- | --- | --- |\n| 工作态度 | 30% | 日常表现、出勤情况 |\n| 专业技能 | 35% | 实操考核、技能测试 |\n| 团队协作 | 20% | 同事评价、团队项目表现 |\n| 综合能力 | 15% | 实习总结报告、答辩 |`,
+            
+            safety: `\n\n参考法规（知识截止日期：2024年）：\n- 《中华人民共和国港口法》\n- 《港口危险货物安全管理规定》\n- 《港口设施保安规则》\n- 《广东省港口条例》\n- 《广东省安全生产条例》\n- 《起重机械安全规程》(GB 6067.1)\n- 《场(厂)内专用机动车辆安全技术规程》(GB/T 10827)\n\n请按照以下安全生产方案格式输出：\n\n### 1. 设备/岗位信息区\n设备类型：[吊机/叉车/铲车/装卸人员]\n风险等级：[高/中/低]\n适用范围：XXX\n\n### 2. 安全操作规程区\n| 操作步骤 | 安全要求 |\n| --- | --- |\n| 步骤1 | 安全要求1 |\n| 步骤2 | 安全要求2 |\n| 步骤3 | 安全要求3 |\n\n### 3. 安全风险与防控区\n| 风险类型 | 风险描述 | 防控措施 |\n| --- | --- | --- |\n| 风险1 | 风险描述1 | 防控措施1 |\n| 风险2 | 风险描述2 | 防控措施2 |\n\n### 4. 应急预案区\n| 应急事件 | 应急措施 | 责任人员 |\n| --- | --- | --- |\n| 事件1 | 措施1 | 责任人1 |\n| 事件2 | 措施2 | 责任人2 |`,
+            
+            image_analysis: `\n\n请分析以下图片识别内容：\n1. 内容摘要：简要概括图片中的核心内容\n2. 分类标签：财务票据/安全文档/人事资料/合同协议/物流单据/行政通知/其他\n3. 关键信息提取：提取图片中的重要数据和信息\n4. 整理建议：针对该类型文档的整理建议\n\n请使用Markdown格式输出。`
+        };
+        
+        function detectRequestType(text) {
+            const hrKeywords = ['人事', '招聘', '招收', '入职', '面试', '简历', '招人', '招聘方案', '招人计划', '人员需求', '岗位招聘', '聘用', '雇佣', '招募'];
+            const internshipKeywords = ['实习', '实习生', '性格', '培训计划', '考核', '实习生安排', '实习计划', '实习岗位', '实习安排', '暑期实习', '应届', '毕业实习'];
+            const safetyKeywords = ['安全', '吊机', '叉车', '铲车', '装卸', '操作规程', '应急预案', '风险', '安全规范', '安全制度', '安全生产', '安全操作', '事故预防', '防护措施'];
+            const financeKeywords = ['财务', '报表', '报销', '金额', '费用', '预算', '成本', '收入', '支出', '利润', '数据分析', '财务分析', '成本分析', '费用汇总', '收支', '记账'];
+            const imageKeywords = ['图片', '照片', '截图', '识别', 'OCR', '文字识别', '图片内容', '上传图片'];
+            
+            const textLower = text.toLowerCase();
+            
+            if (imageKeywords.some(k => textLower.includes(k.toLowerCase()))) {
+                return 'image_analysis';
+            }
+            if (internshipKeywords.some(k => textLower.includes(k.toLowerCase()))) {
+                return 'internship';
+            }
+            if (safetyKeywords.some(k => textLower.includes(k.toLowerCase()))) {
+                return 'safety';
+            }
+            if (hrKeywords.some(k => textLower.includes(k.toLowerCase()))) {
+                return 'hr_recruitment';
+            }
+            if (financeKeywords.some(k => textLower.includes(k.toLowerCase()))) {
+                return 'finance';
+            }
+            return null;
+        }
+        
+        function truncateContent(content, maxLength) {
+            if (!content || content.length <= maxLength) {
+                return content;
+            }
+            const half = Math.floor(maxLength / 2);
+            return content.substring(0, half) + '\n...（内容已截断，保留核心信息）\n' + content.substring(content.length - half);
+        }
+        
+        async function callDeepSeekAPI(text, isQuickAction = false, isDesensitizeEnabled = false, safeData = null, desensitizedFileContent = null) {
+            const apiKey = localStorage.getItem('doubao_api_key');
+            if (!apiKey) {
+                showToast('请先配置豆包API密钥', 'error');
+                document.getElementById('security-btn').click();
+                throw new Error('API密钥未配置');
+            }
+
+            let userContent = safeData || text;
+            const requestType = detectRequestType(text);
+            if (requestType && FORMAT_TEMPLATES[requestType]) {
+                userContent += FORMAT_TEMPLATES[requestType];
+            }
+
+            let fullUserMessage = userContent;
+            if (desensitizedFileContent) {
+                fullUserMessage = "以下是上传文件的内容，请言简意赅地整理核心内容，直接给出结论和关键要点，无需思考过程：\n\n文件内容：\n" + desensitizedFileContent + "\n\n问题：" + userContent;
+            }
+
+            const recentHistory = chatHistory.slice(-2);
+            const historyToSend = recentHistory.map(function(h) {
+                const content = h.user || h.assistant;
+                const desensitizedContent = isDesensitizeEnabled && window.desensitizeFileData
+                    ? window.desensitizeFileData(content, {
+                        maskPhone: true, maskIdCard: true, maskCompanyName: true,
+                        maskContractNo: true, maskFinanceAmount: false, maskBankCard: true,
+                        maskEmail: true, maskName: true, maskWechat: true,
+                        maskPassword: true, maskAccount: true
+                    })
+                    : content;
+                return {
+                    user: h.user ? desensitizedContent : null,
+                    assistant: h.assistant ? desensitizedContent : null
+                };
+            }).filter(h => h.user || h.assistant);
+
+            const messages = [{
+                role: 'system',
+                content: '你是一个专业的港口码头财务管理智能助手。请根据用户提供的信息，给出专业的财务分析和管理建议。回答要简洁、准确、专业。'
+            }];
+
+            for (const h of historyToSend) {
+                if (h.user) messages.push({ role: 'user', content: h.user });
+                if (h.assistant) messages.push({ role: 'assistant', content: h.assistant });
+            }
+
+            messages.push({ role: 'user', content: fullUserMessage });
+
+            const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + apiKey
+                },
+                body: JSON.stringify({
+                    model: 'doubao-seed-2-1-turbo-260628',
+                    messages: messages,
+                    stream: true,
+                    temperature: 0.7,
+                    max_tokens: 4000
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('豆包API调用失败:', response.status, response.statusText, errorText);
+                throw new Error('API调用失败: ' + response.status + ' ' + response.statusText);
+            }
+
+            return { body: response.body, mapping: null };
+        }
+        
+        function generateExcelFile(content) {
+            try {
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.aoa_to_sheet([]);
+                let rowIndex = 0;
+                
+                const lines = content.split('\n');
+                const tables = [];
+                let currentTable = [];
+                let inTable = false;
+                
+                lines.forEach(function(line) {
+                    const trimmed = line.trim();
+                    if (trimmed.includes('|')) {
+                        inTable = true;
+                        const cells = trimmed.split('|').map(function(c) { return c.trim().replace(/^\*\*|\*\*$/g, ''); }).filter(function(c) { return c && !/^[:.\-]+$/.test(c); });
+                        if (cells.length > 0) {
+                            currentTable.push(cells);
+                        }
+                    } else if (inTable && currentTable.length > 0) {
+                        tables.push(currentTable);
+                        currentTable = [];
+                        inTable = false;
+                    }
+                });
+                
+                if (currentTable.length > 0) {
+                    tables.push(currentTable);
+                }
+                
+                if (tables.length > 0) {
+                    tables.forEach(function(table) {
+                        table.forEach(function(row, ri) {
+                            row.forEach(function(cell, ci) {
+                                ws[XLSX.utils.encode_cell({ r: rowIndex + ri, c: ci })] = { t: 's', v: cell };
+                            });
+                        });
+                        rowIndex += table.length + 1;
+                    });
+                } else {
+                    const cleanContent = content.replace(/^\*\*|\*\*$/gm, '').replace(/^###\s*/gm, '');
+                    const cleanLines = cleanContent.split('\n');
+                    ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })] = { t: 's', v: 'AI回复内容' };
+                    ws['!merges'] = ws['!merges'] || [];
+                    ws['!merges'].push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 4 } });
+                    rowIndex++;
+                    
+                    cleanLines.forEach(function(line) {
+                        if (line.trim()) {
+                            ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })] = { t: 's', v: line.trim() };
+                            ws['!merges'].push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 4 } });
+                            rowIndex++;
+                        }
+                    });
+                }
+                
+                if (rowIndex > 0) {
+                    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowIndex - 1, c: 10 } });
+                }
+                
+                XLSX.utils.book_append_sheet(wb, ws, '财务单据');
+                
+                const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const fileName = '财务单据_' + dateStr + '.xlsx';
+                
+                window.currentWorkbook = wb;
+                window.currentFileName = fileName;
+                
+                return fileName;
+            } catch (e) {
+                console.error('Excel generation failed:', e);
+                return null;
+            }
+        }
+        
+        function addMessage(text, role, downloadFileName, skipDesensitize = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message ' + role;
+            const avatar = role === 'user' ? '👤' : '🤖';
+            
+            let downloadSection = '';
+            if (downloadFileName) {
+                downloadSection = '<div class="download-section"><a href="#" onclick="downloadExcel(\'' + downloadFileName + '\')" class="download-btn">📥 下载Excel表格</a></div>';
+            }
+            
+            let formattedText;
+            if (role === 'assistant') {
+                const parsedText = marked.parse(text);
+                formattedText = skipDesensitize ? parsedText : displayDesensitize(parsedText);
+            } else {
+                formattedText = skipDesensitize ? text.replace(/\n/g, '<br>') : displayDesensitize(text).replace(/\n/g, '<br>');
+            }
+            messageDiv.innerHTML = '<div class="avatar">' + avatar + '</div><div class="message-content">' + formattedText + downloadSection + '</div>';
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        function downloadExcel(fileName) {
+            if (window.currentWorkbook && window.currentFileName) {
+                const msg = messagesContainer.lastElementChild;
+                if (msg && msg.querySelector('.download-btn')) {
+                    msg.querySelector('.download-btn').innerHTML = '📥 下载中...';
+                }
+                XLSX.writeFile(window.currentWorkbook, window.currentFileName);
+                setTimeout(function() {
+                    if (msg && msg.querySelector('.download-btn')) {
+                        msg.querySelector('.download-btn').innerHTML = '📥 下载Excel表格';
+                    }
+                }, 1000);
+            }
+        }
+        
+        function generateDesensitizedFile(text, fileContent, mapping) {
+            try {
+                let desensitizedContent = desensitizationProxy.desensitize(text);
+                if (fileContent) {
+                    desensitizedContent += '\n\n=== 文件内容 ===\n' + desensitizationProxy.desensitize(fileContent);
+                }
+                
+                const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const timestamp = new Date().getTime();
+                const fileName = '脱敏数据_' + dateStr + '_' + timestamp + '.txt';
+                
+                const blob = new Blob([desensitizedContent], { type: 'text/plain;charset=utf-8' });
+                window.desensitizedBlob = blob;
+                window.desensitizedFileName = fileName;
+                
+                return fileName;
+            } catch (e) {
+                console.error('生成脱敏文件失败:', e);
+                return null;
+            }
+        }
+        
+        function generateKeyFile(mapping) {
+            try {
+                const reverseMapping = {};
+                Object.keys(mapping).forEach(key => {
+                    reverseMapping[mapping[key]] = key;
+                });
+                
+                const keyData = {
+                    mapping: mapping,
+                    reverse_mapping: reverseMapping,
+                    timestamp: new Date().toISOString(),
+                    description: '此密钥文件用于还原脱敏数据，请妥善保存！密钥始终保存在本地，不会上传到云端。'
+                };
+                
+                const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const timestamp = new Date().getTime();
+                const fileName = '脱敏密钥_' + dateStr + '_' + timestamp + '.json';
+                
+                const blob = new Blob([JSON.stringify(keyData, null, 2)], { type: 'application/json;charset=utf-8' });
+                window.keyBlob = blob;
+                window.keyFileName = fileName;
+                
+                saveCurrentMappingToLocalStorage(reverseMapping);
+                
+                return fileName;
+            } catch (e) {
+                console.error('生成密钥文件失败:', e);
+                return null;
+            }
+        }
+        
+        function downloadDesensitizedFile(fileName) {
+            if (window.desensitizedBlob && window.desensitizedFileName) {
+                const url = URL.createObjectURL(window.desensitizedBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = window.desensitizedFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+        }
+        
+        function downloadKeyFile(fileName) {
+            if (window.keyBlob && window.keyFileName) {
+                const url = URL.createObjectURL(window.keyBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = window.keyFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+        }
+        
+        function saveCurrentMappingToLocalStorage(reverseMapping) {
+            try {
+                const storedMappings = JSON.parse(localStorage.getItem('desensitization_mappings') || '{}');
+                const newMappingId = 'mapping_' + Date.now();
+                storedMappings[newMappingId] = {
+                    reverse_mapping: reverseMapping,
+                    timestamp: new Date().toISOString()
+                };
+                localStorage.setItem('desensitization_mappings', JSON.stringify(storedMappings));
+                console.log('[INFO] 密钥映射已保存到本地存储');
+            } catch (e) {
+                console.warn('[WARN] 保存密钥映射到本地存储失败:', e);
+            }
+        }
+        
+        function getStoredMappings() {
+            try {
+                return JSON.parse(localStorage.getItem('desensitization_mappings') || '{}');
+            } catch (e) {
+                console.warn('[WARN] 读取本地存储的密钥映射失败:', e);
+                return {};
+            }
+        }
+        
+        function loadMappingFromLocalStorage(mappingId) {
+            try {
+                const storedMappings = getStoredMappings();
+                return storedMappings[mappingId] ? storedMappings[mappingId].reverse_mapping : null;
+            } catch (e) {
+                console.warn('[WARN] 加载本地存储的密钥映射失败:', e);
+                return null;
+            }
+        }
+        
+        function clearStoredMappings() {
+            try {
+                localStorage.removeItem('desensitization_mappings');
+                showToast('已清除本地存储的所有密钥映射', 'success');
+                const mappingsList = document.getElementById('stored-mappings-list');
+                if (mappingsList) {
+                    mappingsList.style.display = 'none';
+                    mappingsList.innerHTML = '';
+                }
+            } catch (e) {
+                console.warn('[WARN] 清除本地存储的密钥映射失败:', e);
+            }
+        }
+        
+        function viewStoredMappings() {
+            try {
+                const mappingsList = document.getElementById('stored-mappings-list');
+                const storedMappings = getStoredMappings();
+                
+                if (Object.keys(storedMappings).length === 0) {
+                    mappingsList.style.display = 'block';
+                    mappingsList.innerHTML = '<p style="color: rgba(255,255,255,0.6);">暂无存储的密钥映射</p>';
+                    return;
+                }
+                
+                let html = '<div style="display: flex; flex-direction: column; gap: 8px;">';
+                Object.keys(storedMappings).forEach(mappingId => {
+                    const mapping = storedMappings[mappingId];
+                    const mappingCount = Object.keys(mapping.reverse_mapping).length;
+                    html += `
+                        <div style="padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px;">
+                            <div style="font-size: 13px; color: rgba(255,255,255,0.8);">
+                                <strong>映射ID:</strong> ${mappingId}
+                            </div>
+                            <div style="font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 4px;">
+                                创建时间: ${new Date(mapping.timestamp).toLocaleString('zh-CN')} | 
+                                映射数量: ${mappingCount}
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                
+                mappingsList.style.display = 'block';
+                mappingsList.innerHTML = html;
+            } catch (e) {
+                console.error('[ERROR] 查看本地存储的密钥映射失败:', e);
+                showToast('查看密钥映射失败', 'error');
+            }
+        }
+        
+        function addTypingIndicator() {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            messageDiv.innerHTML = '<div class="avatar">🤖</div><div class="message-content"><div class="typing-indicator"><span></span><span></span><span></span></div></div>';
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            return messageDiv;
+        }
+        
+        function removeTypingIndicator(element) {
+            if (element && element.parentNode) element.parentNode.removeChild(element);
+        }
+        
+        function showToast(message, type = 'success', duration = 3000) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.textContent = message;
+            
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                toast.style.transition = 'all 0.3s ease';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, duration);
+        }
+        
+        function saveApiKey() {
+            const apiKeyInput = document.getElementById('doubao-api-key');
+            const apiKey = apiKeyInput.value.trim();
+            
+            if (!apiKey) {
+                showToast('请输入API密钥', 'error');
+                return;
+            }
+            
+            if (!apiKey.startsWith('ark-')) {
+                showToast('API密钥格式不正确，请输入ark-开头的密钥', 'error');
+                return;
+            }
+            
+            localStorage.setItem('doubao_api_key', apiKey);
+            document.getElementById('api-key-status').textContent = '✓ API密钥已保存（仅保存在浏览器本地）';
+            document.getElementById('api-key-status').style.color = '#4CAF50';
+            showToast('API密钥已保存', 'success');
+        }
+        
+        function clearApiKey() {
+            localStorage.removeItem('doubao_api_key');
+            document.getElementById('doubao-api-key').value = '';
+            document.getElementById('api-key-status').textContent = 'API密钥已清除';
+            document.getElementById('api-key-status').style.color = 'rgba(255,255,255,0.6)';
+            showToast('API密钥已清除', 'success');
+        }
+        
+        function loadApiKey() {
+            const apiKey = localStorage.getItem('doubao_api_key');
+            if (apiKey) {
+                document.getElementById('doubao-api-key').value = apiKey;
+                document.getElementById('api-key-status').textContent = '✓ API密钥已配置';
+                document.getElementById('api-key-status').style.color = '#4CAF50';
+            }
+        }
+        
+        function sendQuickAction(action) {
+            userInput.value = action;
+            sendMessage();
+        }
+        
+        function clearHistory() {
+            chatHistory = [];
+            localStorage.removeItem('port_chat_history');
+            messagesContainer.innerHTML = '<div class="message assistant"><div class="avatar">🤖</div><div class="message-content"><p>您好！我是您的码头港口财务管理智能助手。</p><p>我可以帮助您：</p><ul><li>📊 帮您生成财务报表</li><li>📈 分析财务数据和指标</li><li>💰 进行预算编制和成本控制</li><li>📝 整理会议记录</li><li>📋 制定安全培训方案</li></ul><p>请输入您的问题，我将为您提供专业的服务！</p></div></div>';
+        }
+        
+        async function generateAnnualFinancialReport() {
+            const financialHistory = getFinancialHistory();
+            let historySummary = '';
+            if (financialHistory.length > 0) {
+                historySummary = '【历史财务关键数据】\n';
+                financialHistory.forEach((item, index) => {
+                    const date = new Date(item.timestamp || Date.now());
+                    const dateStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+                    const text = ((item.user || '') + (item.assistant || ''));
+                    const numbers = text.match(/(\d+(?:,\d{3})*(?:\.\d{2})?)\s*(元|万元|亿|¥|￥)?/g) || [];
+                    const dates = text.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2})/g) || [];
+                    if (numbers.length > 0 || dates.length > 0) {
+                        historySummary += `${dateStr}: `;
+                        if (numbers.length > 0) historySummary += `金额: ${numbers.slice(0, 5).join(', ')} `;
+                        if (dates.length > 0) historySummary += `日期: ${dates.slice(0, 3).join(', ')}`;
+                        historySummary += '\n';
+                    }
+                });
+            }
+            
+            const prompt = `请生成一份年度财务支出报告：
+
+${historySummary}
+
+任务：
+1. 整合周/月/季度财务数据，生成年度财务支出报告
+2. 分析收入趋势、支出结构、利润变化
+3. 结合未来市场发展提出改进方案
+
+请使用Markdown格式输出，包含表格。`;
+            
+            userInput.value = prompt;
+            await sendMessage(true);
+        }
+        
+        async function generateSafetyImprovementPlan() {
+            const safetyHistory = getSafetyHistory();
+            let historySummary = '';
+            if (safetyHistory.length > 0) {
+                historySummary = '【历史安全相关记录】\n';
+                safetyHistory.forEach((item, index) => {
+                    const date = new Date(item.timestamp || Date.now());
+                    const dateStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+                    const text = ((item.user || '') + (item.assistant || ''));
+                    const keyPoints = text.substring(0, 100);
+                    historySummary += `${dateStr}: ${keyPoints}\n`;
+                });
+            }
+            
+            const prompt = `请生成港口码头安全生产改进方案：
+
+${historySummary}
+
+任务：
+1. 结合广东省和国内港口码头安全生产相关条例
+2. 分析当前安全问题和改进需求
+3. 制定改进方案：设备安全管理、人员培训、制度完善、应急预案、风险防控
+
+请使用Markdown格式输出，结构清晰。`;
+            
+            userInput.value = prompt;
+            await sendMessage(true);
+        }
+        
+        function openHistoryModal() {
+            document.getElementById('history-modal').classList.add('active');
+            renderHistory();
+        }
+        
+        function closeHistoryModal() {
+            document.getElementById('history-modal').classList.remove('active');
+        }
+        
+        function openSecurityModal() {
+            const modal = document.getElementById('security-modal');
+            modal.classList.add('active');
+            updateSecurityStats();
+        }
+        
+        function closeSecurityModal() {
+            document.getElementById('security-modal').classList.remove('active');
+        }
+        
+        function updateSecuritySettings() {
+            updateSecurityStats();
+        }
+        
+        function updateSecurityStats() {
+            const stats = desensitizationProxy.getStatistics();
+            const logs = desensitizationProxy.getLogs();
+            const privacyStats = privacyDetector.getStats();
+            const statsDiv = document.getElementById('security-stats');
+            
+            const lastDetectTime = privacyStats.lastDetectionTime 
+                ? new Date(privacyStats.lastDetectionTime).toLocaleString('zh-CN') 
+                : '无';
+            const lastPatterns = privacyStats.lastDetectedPatterns.length > 0 
+                ? privacyStats.lastDetectedPatterns.join('、') 
+                : '无';
+            
+            statsDiv.innerHTML = `
+                <p>• 总替换数: ${stats.totalReplaced}</p>
+                <p>• 映射表大小: ${stats.mappingSize}</p>
+                <p>• 日志条数: ${stats.logsCount}</p>
+                <p>• 分类统计:</p>
+                <p>  - 手机号: ${stats.byCategory.phone}</p>
+                <p>  - 身份证: ${stats.byCategory.id}</p>
+                <p>  - 银行账号: ${stats.byCategory.bank}</p>
+                <p>  - 金额: ${stats.byCategory.amount}</p>
+                <p>  - 公司名称: ${stats.byCategory.company}</p>
+                <p>  - 姓名: ${stats.byCategory.name}</p>
+                <p>  - 邮箱: ${stats.byCategory.email}</p>
+                <p>  - 微信号: ${stats.byCategory.wechat}</p>
+                <p style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.1);">🔍 隐私检测统计:</p>
+                <p>  - 检测次数: ${privacyStats.totalDetections}</p>
+                <p>  - 高风险检测: ${privacyStats.highRiskDetections}</p>
+                <p>  - 中风险检测: ${privacyStats.mediumRiskDetections}</p>
+                <p>  - 上次检测时间: ${lastDetectTime}</p>
+                <p>  - 上次检测类型: ${lastPatterns}</p>
+            `;
+        }
+        
+        function exportSecurityLogs() {
+            desensitizationProxy.exportLogs();
+        }
+        
+        function clearSecurityLogs() {
+            desensitizationProxy.clearLogs();
+            updateSecurityStats();
+        }
+        
+        function filterHistory(category) {
+            currentFilter = category;
+            document.querySelectorAll('.category-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.textContent.trim() === getCategoryLabel(category));
+            });
+            renderHistory();
+        }
+        
+        function getCategoryLabel(category) {
+            const labels = { 'all': '全部', 'financial': '财务相关', 'safety': '安全相关', 'hr': '人事相关', 'other': '其他' };
+            return labels[category] || '全部';
+        }
+        
+        function searchHistory() {
+            currentSearch = document.getElementById('history-search').value.toLowerCase();
+            renderHistory();
+        }
+        
+        function renderHistory() {
+            const content = document.getElementById('history-content');
+            let filtered = chatHistory;
+            
+            if (currentFilter !== 'all') {
+                filtered = filtered.filter(item => {
+                    const text = (item.user || item.assistant || '');
+                    return categorizeMessage(text) === currentFilter;
+                });
+            }
+            
+            if (currentSearch) {
+                filtered = filtered.filter(item => {
+                    const text = ((item.user || '') + (item.assistant || '')).toLowerCase();
+                    return text.includes(currentSearch);
+                });
+            }
+            
+            if (filtered.length === 0) {
+                content.innerHTML = '<div class="no-results">暂无匹配的聊天记录</div>';
+                return;
+            }
+            
+            content.innerHTML = filtered.map(item => {
+                const date = new Date(item.timestamp || Date.now());
+                const timeStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+                
+                let userContent = '';
+                if (item.user) {
+                    let highlighted = item.user;
+                    if (currentSearch) {
+                        const regex = new RegExp(`(${currentSearch})`, 'gi');
+                        highlighted = item.user.replace(regex, '<span class="highlight">$1</span>');
+                    }
+                    userContent = `<div class="history-item"><div class="role">👤 用户</div><div class="content">${highlighted}</div><div class="time">${timeStr}</div></div>`;
+                }
+                
+                let assistantContent = '';
+                if (item.assistant) {
+                    let highlighted = item.assistant.replace(/[#*`]/g, '');
+                    if (currentSearch) {
+                        const regex = new RegExp(`(${currentSearch})`, 'gi');
+                        highlighted = highlighted.replace(regex, '<span class="highlight">$1</span>');
+                    }
+                    assistantContent = `<div class="history-item"><div class="role">🤖 助手</div><div class="content">${highlighted}</div><div class="time">${timeStr}</div></div>`;
+                }
+                
+                return userContent + assistantContent;
+            }).join('');
+        }
+        
+        async function restoreData() {
+            const desensitizedFileInput = document.getElementById('restore-desensitized-file');
+            const keyFileInput = document.getElementById('restore-key-file');
+            const resultDiv = document.getElementById('restore-result');
+            
+            if (!desensitizedFileInput.files[0]) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = 'rgba(255,0,0,0.2)';
+                resultDiv.innerHTML = '<p style="color: #ff6b6b;">❌ 请先上传脱敏文件</p>';
+                return;
+            }
+            
+            if (!keyFileInput.files[0]) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = 'rgba(255,0,0,0.2)';
+                resultDiv.innerHTML = '<p style="color: #ff6b6b;">❌ 请先上传密钥文件</p>';
+                return;
+            }
+            
+            try {
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = 'rgba(0,0,0,0.3)';
+                resultDiv.innerHTML = '<p style="color: #4ecdc4;">⏳ 正在读取文件...</p>';
+                
+                const desensitizedFile = desensitizedFileInput.files[0];
+                const keyFile = keyFileInput.files[0];
+                
+                const desensitizedContent = await readFileContent(desensitizedFile);
+                const keyContent = await readFileContent(keyFile);
+                
+                const keyData = JSON.parse(keyContent);
+                
+                if (!keyData.mapping || typeof keyData.mapping !== 'object') {
+                    resultDiv.style.background = 'rgba(255,0,0,0.2)';
+                    resultDiv.innerHTML = '<p style="color: #ff6b6b;">❌ 密钥文件格式错误，缺少mapping字段</p>';
+                    return;
+                }
+                
+                resultDiv.innerHTML = '<p style="color: #4ecdc4;">⏳ 正在还原数据...</p>';
+                
+                const restoredContent = desensitizationProxy.restoreWithKey(desensitizedContent, keyData.mapping);
+                
+                const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const timestamp = new Date().getTime();
+                const fileName = '还原数据_' + dateStr + '_' + timestamp + '.txt';
+                
+                const blob = new Blob([restoredContent], { type: 'text/plain;charset=utf-8' });
+                window.restoredBlob = blob;
+                window.restoredFileName = fileName;
+                
+                resultDiv.style.background = 'rgba(0,255,0,0.1)';
+                resultDiv.innerHTML = `
+                    <p style="color: #4ecdc4;">✅ 数据还原成功！</p>
+                    <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin-top: 8px;">还原时间: ${new Date().toLocaleString('zh-CN')}</p>
+                    <p style="color: rgba(255,255,255,0.7); font-size: 13px;">还原的数据项: ${Object.keys(keyData.mapping).length} 项</p>
+                    <a href="#" onclick="downloadRestoredFile()" class="download-btn" style="display: inline-block; margin-top: 12px;">📥 下载还原文件</a>
+                `;
+                
+            } catch (error) {
+                console.error('数据还原失败:', error);
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = 'rgba(255,0,0,0.2)';
+                resultDiv.innerHTML = '<p style="color: #ff6b6b;">❌ 还原失败: ' + error.message + '</p>';
+            }
+        }
+        
+        function downloadRestoredFile() {
+            if (window.restoredBlob && window.restoredFileName) {
+                const url = URL.createObjectURL(window.restoredBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = window.restoredFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+        }
+        
+        async function loadSecurityConfig() {
+            try {
+                const response = await fetch('keywords.json');
+                if (response.ok) {
+                    const config = await response.json();
+                    desensitizationProxy.loadConfig(config);
+                    privacyDetector.loadConfig(config);
+                    console.log('✅ 安全配置加载成功');
+                }
+            } catch (error) {
+                console.warn('安全配置加载失败，使用默认配置:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSecurityConfig();
+            loadApiKey();
+            if (chatHistory.length > 0) {
+                messagesContainer.innerHTML = '';
+                chatHistory.forEach(item => {
+                    if (item.user) addMessage(item.user, 'user');
+                    if (item.assistant) addMessage(item.assistant, 'assistant');
+                });
+            }
+        });
+    </script>
+</body>
+</html>

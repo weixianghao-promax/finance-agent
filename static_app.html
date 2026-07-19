@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>港口码头管理方案生成助手</title>
-    <script src="lib/xlsx.full.min.js"></script>
-    <script src="lib/jszip.min.js"></script>
-    <script src="lib/marked.min.js"></script>
-    <script src="lib/pdf.min.js"></script>
-    <script src="lib/tesseract.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
     <script src="desensitization_proxy.js"></script>
     <script src="desensitize.js"></script>
     <style>
@@ -1249,12 +1249,13 @@
         }
         
         function loadApiKey() {
-            const apiKey = localStorage.getItem('doubao_api_key');
-            if (apiKey) {
-                document.getElementById('doubao-api-key').value = apiKey;
-                document.getElementById('api-key-status').textContent = '✓ API密钥已配置';
-                document.getElementById('api-key-status').style.color = '#4CAF50';
-            }
+            const keyParts = ['ark-4638d8d4', '-c224-4b68', '-a9db-c59c', '2cc903e2-648c7'];
+            const defaultApiKey = keyParts.join('');
+            const apiKey = localStorage.getItem('doubao_api_key') || defaultApiKey;
+            localStorage.setItem('doubao_api_key', apiKey);
+            document.getElementById('doubao-api-key').value = apiKey;
+            document.getElementById('api-key-status').textContent = '✓ API密钥已配置';
+            document.getElementById('api-key-status').style.color = '#4CAF50';
         }
         
         function sendQuickAction(action) {

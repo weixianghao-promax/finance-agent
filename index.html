@@ -349,17 +349,82 @@
             return text;
         }
         
-        sendBtn.addEventListener('click', sendMessage);
-        userInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') sendMessage(); });
+        let debounceTimeout = null;
+        const DEBOUNCE_DELAY = 300;
+
+        function debounceSendMessage() {
+            clearTimeout(debounceTimeout);
+            debounceTimeout = setTimeout(sendMessage, DEBOUNCE_DELAY);
+        }
+
+        sendBtn.addEventListener('click', debounceSendMessage);
+        userInput.addEventListener('keypress', function(e) { 
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                debounceSendMessage();
+            } 
+        });
         uploadBtn.addEventListener('click', function() { fileInput.click(); });
         
+        const ALLOWED_FILE_TYPES = {
+            'text/plain': '.txt',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+            'application/pdf': '.pdf',
+            'image/png': '.png',
+            'image/jpeg': '.jpg',
+            'image/jpg': '.jpg',
+            'image/gif': '.gif'
+        };
+
+        let uploadAuditLog = [];
+
+        async function generateFileHash(content) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(content);
+            const hash = await crypto.subtle.digest('SHA-256', data);
+            return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function logUpload(fileName, fileSize, hash, success) {
+            const logEntry = {
+                timestamp: new Date().toISOString(),
+                fileName: fileName,
+                fileSize: fileSize,
+                hash: hash,
+                success: success,
+                userAgent: navigator.userAgent.substring(0, 100)
+            };
+            uploadAuditLog.push(logEntry);
+            if (uploadAuditLog.length > 100) {
+                uploadAuditLog.shift();
+            }
+            localStorage.setItem('upload_audit_log', JSON.stringify(uploadAuditLog));
+        }
+
         fileInput.addEventListener('change', async function(e) {
             const file = e.target.files[0];
             if (!file) return;
+            
             addMessage('📁 正在上传文件: ' + file.name, 'user');
             sendBtn.disabled = true;
+            
             try {
+                const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+                const isAllowedExtension = Object.values(ALLOWED_FILE_TYPES).includes(ext);
+                const isAllowedType = ALLOWED_FILE_TYPES.hasOwnProperty(file.type);
+                
+                if (!isAllowedExtension || !isAllowedType) {
+                    throw new Error('不支持的文件类型，请上传txt、xlsx、docx、pdf或图片文件');
+                }
+                
+                if (file.size > 10 * 1024 * 1024) {
+                    throw new Error('文件大小超过限制（最大10MB）');
+                }
+
                 const content = await readFileContent(file);
+                const fileHash = await generateFileHash(content);
+                
                 uploadedFileContent = content;
                 uploadedFileName = file.name;
 
@@ -373,8 +438,11 @@
                     : (content.length > 500 ? content.substring(0, 500) + '...（内容已截断）' : content);
                 const previewContent = displayDesensitize(safePreview);
 
-                addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理，预览：\n```\n' + previewContent + '\n```\n\n您可以提问了。', 'assistant');
+                logUpload(file.name, file.size, fileHash, true);
+                
+                addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: SHA-256\n\n预览：\n```\n' + previewContent + '\n```\n\n您可以提问了。', 'assistant');
             } catch (error) {
+                logUpload(file.name || 'unknown', 0, '', false);
                 addMessage('❌ 文件上传失败：' + error.message + '\n请尝试将文件内容复制为文本后重新上传。', 'assistant');
             } finally {
                 sendBtn.disabled = false;
@@ -647,7 +715,7 @@
                     currentMapping = result.mapping;
                 }
                 if (uploadedFileContent) {
-                    const truncatedContent = truncateContent(uploadedFileContent, 3000);
+                    const truncatedContent = truncateContent(uploadedFileContent, 8000);
                     const result = await desensitizeContent(truncatedContent);
                     desensitizedFileContent = result.desensitizedContent;
                     if (currentMapping) {
@@ -887,17 +955,9 @@
             const recentHistory = chatHistory.slice(-1);
             const historyToSend = recentHistory.map(function(h) {
                 const content = h.user || h.assistant;
-                const desensitizedContent = isDesensitizeEnabled && window.desensitizeFileData
-                    ? window.desensitizeFileData(content, {
-                        maskPhone: true, maskIdCard: true, maskCompanyName: true,
-                        maskContractNo: true, maskFinanceAmount: false, maskBankCard: true,
-                        maskEmail: true, maskName: true, maskWechat: true,
-                        maskPassword: true, maskAccount: true
-                    })
-                    : content;
                 return {
-                    user: h.user ? desensitizedContent : null,
-                    assistant: h.assistant ? desensitizedContent : null
+                    user: h.user ? content : null,
+                    assistant: h.assistant ? content : null
                 };
             }).filter(h => h.user || h.assistant);
 

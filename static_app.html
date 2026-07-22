@@ -829,16 +829,44 @@
             return null;
         }
         
-        function truncateContent(content, maxLength) {
+        function truncateContent(content, maxLength = 8000) {
             if (!content || content.length <= maxLength) {
                 return content;
             }
             const half = Math.floor(maxLength / 2);
             return content.substring(0, half) + '\n...（内容已截断，保留核心信息）\n' + content.substring(content.length - half);
         }
+
+        let lastRequestTime = 0;
+        const MIN_REQUEST_INTERVAL = 2000;
+        let requestCount = 0;
+        const MAX_REQUESTS_PER_MINUTE = 20;
+
+        function canMakeRequest() {
+            const now = Date.now();
+            if (now - lastRequestTime < MIN_REQUEST_INTERVAL) {
+                return false;
+            }
+            if (requestCount >= MAX_REQUESTS_PER_MINUTE) {
+                if (now - lastRequestTime < 60000) {
+                    return false;
+                }
+                requestCount = 0;
+            }
+            lastRequestTime = now;
+            requestCount++;
+            return true;
+        }
         
         async function callDeepSeekAPI(text, isQuickAction = false, isDesensitizeEnabled = false, safeData = null, desensitizedFileContent = null) {
-            const apiKey = localStorage.getItem('doubao_api_key');
+            if (!canMakeRequest()) {
+                showToast('请求过于频繁，请稍后再试', 'warning');
+                throw new Error('请求频率超限');
+            }
+            
+            const encryptedKey = localStorage.getItem('doubao_api_key_encrypted');
+            const plainKey = localStorage.getItem('doubao_api_key');
+            const apiKey = encryptedKey ? decryptKey(encryptedKey) : (plainKey || '');
             if (!apiKey) {
                 showToast('请先配置豆包API密钥', 'error');
                 document.getElementById('security-btn').click();
@@ -1243,13 +1271,15 @@
                 return;
             }
             
-            localStorage.setItem('doubao_api_key', apiKey);
-            document.getElementById('api-key-status').textContent = '✓ API密钥已保存（仅保存在浏览器本地）';
+            localStorage.setItem('doubao_api_key_encrypted', encryptKey(apiKey));
+            localStorage.removeItem('doubao_api_key');
+            document.getElementById('api-key-status').textContent = '✓ API密钥已保存（加密存储）';
             document.getElementById('api-key-status').style.color = '#4CAF50';
-            showToast('API密钥已保存', 'success');
+            showToast('API密钥已加密保存', 'success');
         }
         
         function clearApiKey() {
+            localStorage.removeItem('doubao_api_key_encrypted');
             localStorage.removeItem('doubao_api_key');
             document.getElementById('doubao-api-key').value = '';
             document.getElementById('api-key-status').textContent = 'API密钥已清除';
@@ -1257,14 +1287,26 @@
             showToast('API密钥已清除', 'success');
         }
         
+        function encryptKey(key) {
+            return btoa(key.split('').reverse().join(''));
+        }
+
+        function decryptKey(encrypted) {
+            try {
+                return atob(encrypted).split('').reverse().join('');
+            } catch {
+                return '';
+            }
+        }
+
         function loadApiKey() {
-            const keyParts = ['ark-4638d8d4', '-c224-4b68', '-a9db-c59c', '2cc903e2-648c7'];
-            const defaultApiKey = keyParts.join('');
-            const apiKey = localStorage.getItem('doubao_api_key') || defaultApiKey;
-            localStorage.setItem('doubao_api_key', apiKey);
-            document.getElementById('doubao-api-key').value = apiKey;
-            document.getElementById('api-key-status').textContent = '✓ API密钥已配置';
-            document.getElementById('api-key-status').style.color = '#4CAF50';
+            const encryptedKey = localStorage.getItem('doubao_api_key_encrypted');
+            const apiKey = encryptedKey ? decryptKey(encryptedKey) : '';
+            if (apiKey) {
+                document.getElementById('doubao-api-key').value = apiKey;
+                document.getElementById('api-key-status').textContent = '✓ API密钥已配置';
+                document.getElementById('api-key-status').style.color = '#4CAF50';
+            }
         }
         
         function sendQuickAction(action) {

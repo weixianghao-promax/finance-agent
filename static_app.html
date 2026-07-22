@@ -835,21 +835,42 @@
                     }
                 }
                 
-                const hasTableOrFinance = restoredResponse.includes('|') || 
-                                          restoredResponse.includes('序号') || 
-                                          restoredResponse.includes('金额') || 
-                                          restoredResponse.includes('费用') ||
-                                          restoredResponse.includes('单据基础信息') ||
-                                          restoredResponse.includes('核心费用明细') ||
-                                          restoredResponse.includes('合计汇总');
-                if (hasTableOrFinance) {
-                    const downloadFileName = generateExcelFile(restoredResponse);
-                    if (downloadFileName) {
-                        const downloadSection = document.createElement('div');
-                        downloadSection.className = 'download-section';
-                        downloadSection.innerHTML = '<a href="#" onclick="downloadExcel(\'' + downloadFileName + '\')" class="download-btn">📥 下载Excel表格</a>';
-                        streamContent.appendChild(downloadSection);
-                    }
+                const fileType = detectFileType(text, uploadedFileName);
+                let downloadFileName = null;
+                let downloadBtnHtml = '';
+                
+                switch (fileType) {
+                    case 'excel':
+                        downloadFileName = generateExcelFile(restoredResponse);
+                        if (downloadFileName) {
+                            downloadBtnHtml = '<a href="#" onclick="downloadExcel(\'' + downloadFileName + '\')" class="download-btn">📥 下载Excel表格</a>';
+                        }
+                        break;
+                    case 'word':
+                        downloadFileName = generateWordFile(restoredResponse);
+                        if (downloadFileName) {
+                            downloadBtnHtml = '<a href="#" onclick="generateWordFile(\'' + encodeURIComponent(restoredResponse) + '\')" class="download-btn">📥 下载Word文档</a>';
+                        }
+                        break;
+                    case 'markdown':
+                        downloadFileName = generateMarkdownFile(restoredResponse);
+                        if (downloadFileName) {
+                            downloadBtnHtml = '<a href="#" onclick="generateMarkdownFile(\'' + encodeURIComponent(restoredResponse) + '\')" class="download-btn">📥 下载Markdown文件</a>';
+                        }
+                        break;
+                    case 'txt':
+                        downloadFileName = generateTxtFile(restoredResponse);
+                        if (downloadFileName) {
+                            downloadBtnHtml = '<a href="#" onclick="generateTxtFile(\'' + encodeURIComponent(restoredResponse) + '\')" class="download-btn">📥 下载文本文件</a>';
+                        }
+                        break;
+                }
+                
+                if (downloadFileName) {
+                    const downloadSection = document.createElement('div');
+                    downloadSection.className = 'download-section';
+                    downloadSection.innerHTML = downloadBtnHtml;
+                    streamContent.appendChild(downloadSection);
                 }
                 
             } catch (error) {
@@ -1046,28 +1067,65 @@
                 }
                 
                 if (tables.length > 0) {
+                    let tableCount = 1;
                     tables.forEach(function(table) {
+                        ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })] = { t: 's', v: '表格' + tableCount };
+                        ws['!merges'] = ws['!merges'] || [];
+                        ws['!merges'].push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 10 } });
+                        rowIndex++;
+                        
                         table.forEach(function(row, ri) {
                             row.forEach(function(cell, ci) {
-                                ws[XLSX.utils.encode_cell({ r: rowIndex + ri, c: ci })] = { t: 's', v: cell };
+                                const cellRef = XLSX.utils.encode_cell({ r: rowIndex + ri, c: ci });
+                                if (ri === 0) {
+                                    ws[cellRef] = { t: 's', v: cell };
+                                } else {
+                                    const numValue = parseFloat(cell.replace(/[,，￥¥]/g, ''));
+                                    if (!isNaN(numValue)) {
+                                        ws[cellRef] = { t: 'n', v: numValue };
+                                    } else {
+                                        ws[cellRef] = { t: 's', v: cell };
+                                    }
+                                }
                             });
                         });
-                        rowIndex += table.length + 1;
+                        rowIndex += table.length + 2;
+                        tableCount++;
                     });
                 } else {
-                    const cleanContent = content.replace(/^\*\*|\*\*$/gm, '').replace(/^###\s*/gm, '');
-                    const cleanLines = cleanContent.split('\n');
-                    ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })] = { t: 's', v: 'AI回复内容' };
-                    ws['!merges'] = ws['!merges'] || [];
-                    ws['!merges'].push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 4 } });
-                    rowIndex++;
+                    const sections = content.split(/\n###\s*/);
+                    let sectionCount = 1;
                     
-                    cleanLines.forEach(function(line) {
-                        if (line.trim()) {
-                            ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })] = { t: 's', v: line.trim() };
-                            ws['!merges'].push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 4 } });
+                    sections.forEach(function(section) {
+                        if (!section.trim()) return;
+                        
+                        const sectionLines = section.split('\n');
+                        const sectionTitle = sectionLines[0].trim().replace(/^###\s*/, '');
+                        
+                        if (sectionTitle) {
+                            ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })] = { t: 's', v: sectionTitle };
+                            ws['!merges'].push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 10 } });
                             rowIndex++;
                         }
+                        
+                        for (let i = 1; i < sectionLines.length; i++) {
+                            const line = sectionLines[i].trim();
+                            if (!line) continue;
+                            
+                            const match = line.match(/^([^\：\:\-]+)[\：\:\-](.+)$/);
+                            if (match) {
+                                ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })] = { t: 's', v: match[1].trim() };
+                                ws[XLSX.utils.encode_cell({ r: rowIndex, c: 1 })] = { t: 's', v: match[2].trim() };
+                                rowIndex++;
+                            } else {
+                                ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })] = { t: 's', v: line };
+                                ws['!merges'].push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 10 } });
+                                rowIndex++;
+                            }
+                        }
+                        
+                        rowIndex++;
+                        sectionCount++;
                     });
                 }
                 
@@ -1090,7 +1148,144 @@
             }
         }
         
-        function addMessage(text, role, downloadFileName, skipDesensitize = false) {
+        function detectFileType(text, fileName) {
+                const excelKeywords = ['报表', '表格', '数据', '统计', '清单', '汇总', '明细', '台账'];
+                const wordKeywords = ['文档', '报告', '总结', '方案', '分析', '说明', '纪要'];
+                const markdownKeywords = ['markdown', 'md', '格式'];
+                const txtKeywords = ['文本', 'txt', '纯文本'];
+                
+                let detectedType = 'excel';
+                
+                if (fileName) {
+                    const ext = fileName.toLowerCase().split('.').pop();
+                    if (ext === 'xlsx' || ext === 'xls') {
+                        detectedType = 'excel';
+                    } else if (ext === 'docx' || ext === 'doc') {
+                        detectedType = 'word';
+                    } else if (ext === 'md') {
+                        detectedType = 'markdown';
+                    }
+                }
+                
+                if (text) {
+                    const lowerText = text.toLowerCase();
+                    
+                    if (wordKeywords.some(k => lowerText.includes(k))) {
+                        detectedType = 'word';
+                    } else if (markdownKeywords.some(k => lowerText.includes(k))) {
+                        detectedType = 'markdown';
+                    } else if (txtKeywords.some(k => lowerText.includes(k))) {
+                        detectedType = 'txt';
+                    } else if (excelKeywords.some(k => lowerText.includes(k))) {
+                        detectedType = 'excel';
+                    }
+                }
+                
+                return detectedType;
+            }
+            
+            function generateWordFile(content) {
+                try {
+                    const zip = new JSZip();
+                    
+                    const docContent = `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Title"/>
+      </w:pPr>
+      <w:r>
+        <w:t>AI分析报告</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>${new Date().toLocaleString()}</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">${content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '</w:t></w:r></w:p><w:p><w:r><w:t xml:space="preserve">')}</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>`;
+                    
+                    zip.file('word/document.xml', docContent);
+                    
+                    const relsContent = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+                    
+                    zip.file('_rels/.rels', relsContent);
+                    
+                    const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`;
+                    
+                    zip.file('[Content_Types].xml', contentTypes);
+                    
+                    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                    const fileName = '分析报告_' + dateStr + '.docx';
+                    
+                    zip.generateAsync({ type: 'blob' }).then(function(blob) {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = fileName;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    });
+                    
+                    return fileName;
+                } catch (e) {
+                    console.error('Word generation failed:', e);
+                    return null;
+                }
+            }
+            
+            function generateMarkdownFile(content) {
+                const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const fileName = '分析报告_' + dateStr + '.md';
+                
+                const blob = new Blob([content], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                return fileName;
+            }
+            
+            function generateTxtFile(content) {
+                const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const fileName = '分析报告_' + dateStr + '.txt';
+                
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                return fileName;
+            }
+            
+            function addMessage(text, role, downloadFileName, skipDesensitize = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message ' + role;
             const avatar = role === 'user' ? '👤' : '🤖';
@@ -1709,6 +1904,11 @@ ${historySummary}
                 }, 300);
             }
         });
+        
+        window.generateWordFile = generateWordFile;
+        window.generateMarkdownFile = generateMarkdownFile;
+        window.generateTxtFile = generateTxtFile;
+        window.detectFileType = detectFileType;
     </script>
 </body>
 </html>

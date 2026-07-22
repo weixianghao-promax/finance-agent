@@ -1214,7 +1214,7 @@
                 document.getElementById('api-key-status').style.color = '#4CAF50';
             }
 
-            let userContent = safeData || text;
+            let userContent = safeData || desensitizedText || text;
             const requestType = detectRequestType(text);
             if (requestType && FORMAT_TEMPLATES[requestType]) {
                 userContent += FORMAT_TEMPLATES[requestType];

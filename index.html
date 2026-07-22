@@ -41,6 +41,14 @@
         .message .message-content { padding: 15px 20px; border-radius: 18px; line-height: 1.6; font-size: 15px; word-break: break-all; }
         .message.user .message-content { background: linear-gradient(135deg, #42a5f5, #1e88e5); color: white; border-bottom-right-radius: 4px; }
         .message.assistant .message-content { background: rgba(255,255,255,0.1); color: white; border-bottom-left-radius: 4px; }
+        .thinking-container { display: none; margin-bottom: 10px; margin-left: 52px; }
+        .thinking-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(255, 193, 7, 0.15); border-radius: 12px 12px 0 0; cursor: pointer; color: #ffc107; font-size: 13px; font-weight: 500; transition: background 0.3s; }
+        .thinking-header:hover { background: rgba(255, 193, 7, 0.25); }
+        .thinking-header .toggle-icon { font-size: 10px; transition: transform 0.3s; }
+        .thinking-header.collapsed .toggle-icon { transform: rotate(-90deg); }
+        .thinking-content { padding: 12px; background: rgba(255, 193, 7, 0.08); border-radius: 0 0 12px 12px; color: rgba(255,255,255,0.85); font-size: 14px; line-height: 1.6; border-top: 1px solid rgba(255, 193, 7, 0.2); }
+        .thinking-content p { margin: 0 0 8px 0; }
+        .thinking-content p:last-child { margin-bottom: 0; }
         .typing-indicator { display: flex; gap: 4px; padding: 10px; }
         .typing-indicator span { width: 8px; height: 8px; background: #42a5f5; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
         .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
@@ -835,12 +843,20 @@
             const streamContent = document.createElement('div');
             streamContent.className = 'message-content';
             
+            const thinkingContainer = document.createElement('div');
+            thinkingContainer.className = 'thinking-container';
+            thinkingContainer.innerHTML = '<div class="thinking-header" onclick="toggleThinking(this)">🧠 思考过程 <span class="toggle-icon">▼</span></div><div class="thinking-content"></div>';
+            
             streamMessageDiv.appendChild(avatarDiv);
+            streamMessageDiv.appendChild(thinkingContainer);
             streamMessageDiv.appendChild(streamContent);
             messagesContainer.appendChild(streamMessageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
             
             let fullResponse = '';
+            let thinkingContent = '';
+            let answerContent = '';
+            let inThinking = true;
             let renderInterval = null;
             let pendingRender = false;
             
@@ -855,8 +871,25 @@
                 const renderContent = () => {
                     if (!pendingRender) return;
                     pendingRender = false;
-                    let displayContent = fullResponse;
-                    streamContent.innerHTML = displayDesensitize(marked.parse(displayContent));
+                    
+                    const thinkingDiv = thinkingContainer.querySelector('.thinking-content');
+                    const thinkingHeader = thinkingContainer.querySelector('.thinking-header');
+                    
+                    if (thinkingContent && inThinking) {
+                        thinkingContainer.style.display = 'block';
+                        thinkingDiv.innerHTML = displayDesensitize(marked.parse(thinkingContent));
+                        thinkingHeader.classList.add('expanded');
+                        thinkingHeader.querySelector('.toggle-icon').textContent = '▼';
+                    } else if (thinkingContent && !inThinking) {
+                        thinkingContainer.style.display = 'block';
+                    }
+                    
+                    if (!inThinking) {
+                        streamContent.innerHTML = displayDesensitize(marked.parse(answerContent));
+                    } else if (!thinkingContent) {
+                        streamContent.innerHTML = displayDesensitize(marked.parse(fullResponse));
+                    }
+                    
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 };
                 
@@ -878,6 +911,20 @@
                                 const content = json.choices?.[0]?.delta?.content || '';
                                 if (content) {
                                     fullResponse += content;
+                                    
+                                    if (inThinking) {
+                                        if (content.includes('[回答]')) {
+                                            const parts = content.split('[回答]');
+                                            thinkingContent += parts[0];
+                                            answerContent = parts[1] || '';
+                                            inThinking = false;
+                                        } else {
+                                            thinkingContent += content;
+                                        }
+                                    } else {
+                                        answerContent += content;
+                                    }
+                                    
                                     pendingRender = true;
                                 }
                             } catch (e) {
@@ -889,21 +936,35 @@
                 
                 clearInterval(renderInterval);
                 
-                let restoredResponse = fullResponse;
+                let restoredThinking = thinkingContent;
+                let restoredAnswer = answerContent || fullResponse;
+                
                 if (isDesensitizeEnabled && currentMapping && Object.keys(currentMapping).length > 0) {
                     try {
-                        restoredResponse = desensitizationProxy.restoreWithKey(fullResponse, currentMapping);
-                        console.log('[INFO] 数据还原完成，还原前长度:', fullResponse.length, '还原后长度:', restoredResponse.length);
+                        restoredThinking = desensitizationProxy.restoreWithKey(thinkingContent, currentMapping);
+                        restoredAnswer = desensitizationProxy.restoreWithKey(answerContent || fullResponse, currentMapping);
+                        console.log('[INFO] 数据还原完成');
                     } catch (e) {
                         console.warn('[WARN] 数据还原失败:', e);
-                        restoredResponse = fullResponse;
                     }
                 }
                 
-                streamContent.innerHTML = displayDesensitize(marked.parse(restoredResponse));
+                const thinkingDiv = thinkingContainer.querySelector('.thinking-content');
+                const thinkingHeader = thinkingContainer.querySelector('.thinking-header');
+                
+                if (restoredThinking && restoredThinking.trim().replace('[思考]', '').trim()) {
+                    thinkingContainer.style.display = 'block';
+                    thinkingDiv.innerHTML = displayDesensitize(marked.parse(restoredThinking.replace('[思考]', '').trim()));
+                    thinkingHeader.classList.add('expanded');
+                    thinkingHeader.querySelector('.toggle-icon').textContent = '▼';
+                } else {
+                    thinkingContainer.style.display = 'none';
+                }
+                
+                streamContent.innerHTML = displayDesensitize(marked.parse(restoredAnswer.replace('[回答]', '').trim()));
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 
-                chatHistory.push({ user: text, assistant: restoredResponse, timestamp: Date.now() });
+                chatHistory.push({ user: text, assistant: restoredAnswer, timestamp: Date.now() });
                 saveChatHistory();
                 
                 streamMessageDiv.classList.remove('streaming');
@@ -1131,7 +1192,7 @@
 
             const messages = [{
                 role: 'system',
-                content: '港口财务助手，简洁专业回答。'
+                content: '你是港口财务助手。请先进行思考分析，然后给出最终回答。输出格式要求：先用[思考]标记开始思考过程，描述你的分析步骤；再用[回答]标记开始最终回答。例如：[思考]用户问的是关于财务报表的问题，我需要分析数据并提供专业建议。[回答]根据数据分析，以下是财务报表分析结果...'
             }];
 
             messages.push({ role: 'user', content: fullUserMessage });
@@ -1645,6 +1706,21 @@
         
         function removeTypingIndicator(element) {
             if (element && element.parentNode) element.parentNode.removeChild(element);
+        }
+        
+        function toggleThinking(header) {
+            const content = header.nextElementSibling;
+            const icon = header.querySelector('.toggle-icon');
+            
+            if (header.classList.contains('collapsed')) {
+                header.classList.remove('collapsed');
+                content.style.display = 'block';
+                icon.textContent = '▼';
+            } else {
+                header.classList.add('collapsed');
+                content.style.display = 'none';
+                icon.textContent = '▶';
+            }
         }
         
         function showToast(message, type = 'success', duration = 3000) {

@@ -546,7 +546,12 @@
 
                 logUpload(file.name, file.size, fileHash, true);
                 
-                addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: SHA-256\n\n预览：\n```\n' + previewContent + '\n```\n\n📥 [下载脱敏文件](' + generateDownloadLink(desensitizedFullContent, file.name) + ') | 📥 [下载密钥文件](' + generateKeyFile(uploadedFileMapping) + ')\n\n您可以提问了。', 'assistant');
+                setTimeout(() => {
+                    downloadDesensitizedFile();
+                    setTimeout(() => downloadKeyFile(), 500);
+                }, 300);
+                
+                addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: SHA-256\n\n预览：\n```\n' + previewContent + '\n```\n\n📥 已自动下载脱敏文件和密钥文件\n\n您可以提问了。', 'assistant');
             } catch (error) {
                 logUpload(file.name || 'unknown', 0, '', false);
                 addMessage('❌ 文件上传失败：' + error.message + '\n请尝试将文件内容复制为文本后重新上传。', 'assistant');
@@ -1030,45 +1035,29 @@
                 }
                 
                 let finalFileType = selectedFormat === 'auto' ? detectFileType(text, uploadedFileName) : selectedFormat;
-                let downloadFileName = null;
-                let downloadBtnHtml = '';
                 
                 switch (finalFileType) {
                     case 'excel':
-                        downloadFileName = generateExcelFile(restoredResponse);
-                        if (downloadFileName) {
-                            downloadBtnHtml = '<a href="#" onclick="downloadExcel(\'' + downloadFileName + '\')" class="download-btn">📥 下载Excel表格</a>';
-                        }
+                        setTimeout(() => generateExcelFile(restoredAnswer, true), 500);
                         break;
                     case 'word':
-                        downloadFileName = generateWordFile(restoredResponse);
-                        if (downloadFileName) {
-                            downloadBtnHtml = '<a href="#" onclick="generateWordFile(\'' + encodeURIComponent(restoredResponse) + '\')" class="download-btn">📥 下载Word文档</a>';
-                        }
+                        setTimeout(() => generateWordFile(restoredAnswer, true), 500);
                         break;
                     case 'markdown':
-                        downloadFileName = generateMarkdownFile(restoredResponse);
-                        if (downloadFileName) {
-                            downloadBtnHtml = '<a href="#" onclick="generateMarkdownFile(\'' + encodeURIComponent(restoredResponse) + '\')" class="download-btn">📥 下载Markdown文件</a>';
-                        }
+                        setTimeout(() => generateMarkdownFile(restoredAnswer, true), 500);
                         break;
                     case 'txt':
-                        downloadFileName = generateTxtFile(restoredResponse);
-                        if (downloadFileName) {
-                            downloadBtnHtml = '<a href="#" onclick="generateTxtFile(\'' + encodeURIComponent(restoredResponse) + '\')" class="download-btn">📥 下载文本文件</a>';
-                        }
+                        setTimeout(() => generateTxtFile(restoredAnswer, true), 500);
                         break;
                 }
                 
-                if (downloadFileName) {
-                    const formatInfo = FORMAT_CONFIG[finalFileType];
-                    const fileTypeTag = `<span class="file-type-tag ${finalFileType}">${formatInfo ? formatInfo.icon + ' ' + formatInfo.name : '未知格式'}</span>`;
-                    
-                    const downloadSection = document.createElement('div');
-                    downloadSection.className = 'download-section';
-                    downloadSection.innerHTML = fileTypeTag + downloadBtnHtml;
-                    streamContent.appendChild(downloadSection);
-                }
+                const formatInfo = FORMAT_CONFIG[finalFileType];
+                const fileTypeTag = `<span class="file-type-tag ${finalFileType}">${formatInfo ? formatInfo.icon + ' ' + formatInfo.name : '未知格式'}</span>`;
+                
+                const downloadSection = document.createElement('div');
+                downloadSection.className = 'download-section';
+                downloadSection.innerHTML = fileTypeTag + ' 📥 已自动下载还原后的文件';
+                streamContent.appendChild(downloadSection);
                 
             } catch (error) {
                 console.error('发送消息失败:', error);
@@ -1304,28 +1293,66 @@
             return result;
         }
         
-        function generateDownloadLink(content, fileName) {
-            const ext = fileName.split('.').pop().toLowerCase();
-            let blob;
-            let downloadFileName = 'desensitized_' + fileName;
-            
-            if (['xlsx', 'xls'].includes(ext)) {
-                const wb = XLSX.read(content, { type: 'binary' });
-                const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-                blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-            } else if (['docx', 'doc'].includes(ext)) {
-                blob = new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-            } else {
-                blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-                downloadFileName = 'desensitized_' + fileName.replace(/\.[^.]+$/, '.txt');
-            }
-            
+        function downloadFile(content, fileName, contentType) {
+            const blob = new Blob([content], { type: contentType });
             const url = URL.createObjectURL(blob);
-            setTimeout(() => URL.revokeObjectURL(url), 60000);
-            return url;
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
         
-        function generateExcelFile(content) {
+        function downloadDesensitizedFile() {
+            if (!uploadedFileContent || !uploadedFileName) {
+                showToast('请先上传文件', 'warning');
+                return;
+            }
+            
+            const ext = uploadedFileName.split('.').pop().toLowerCase();
+            const downloadFileName = 'desensitized_' + uploadedFileName;
+            
+            if (['xlsx', 'xls'].includes(ext)) {
+                const lines = uploadedFileContent.split('\n');
+                const data = lines.map(line => line.split('\t'));
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+                const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                downloadFile(new Uint8Array(wbout), downloadFileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            } else if (['docx', 'doc'].includes(ext)) {
+                const zip = new JSZip();
+                zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8"?>
+                    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                        <w:body>
+                            <w:p>
+                                <w:r>
+                                    <w:t>${uploadedFileContent}</w:t>
+                                </w:r>
+                            </w:p>
+                        </w:body>
+                    </w:document>`);
+                zip.generateAsync({ type: 'blob' }).then(function(content) {
+                    downloadFile(content, downloadFileName, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+                });
+            } else {
+                downloadFile(uploadedFileContent, downloadFileName, 'text/plain;charset=utf-8');
+            }
+        }
+        
+        function downloadKeyFile() {
+            if (!uploadedFileMapping || Object.keys(uploadedFileMapping).length === 0) {
+                showToast('暂无密钥文件可下载', 'warning');
+                return;
+            }
+            
+            const keyContent = JSON.stringify(uploadedFileMapping, null, 2);
+            downloadFile(keyContent, 'desensitization_keys.json', 'application/json;charset=utf-8');
+        }
+        
+        function generateExcelFile(content, autoDownload = false) {
             try {
                 const wb = XLSX.utils.book_new();
                 const ws = XLSX.utils.aoa_to_sheet([]);
@@ -1430,6 +1457,11 @@
                 
                 window.currentWorkbook = wb;
                 window.currentFileName = fileName;
+                
+                if (autoDownload) {
+                    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                    downloadFile(new Uint8Array(wbout), fileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                }
                 
                 return fileName;
             } catch (e) {

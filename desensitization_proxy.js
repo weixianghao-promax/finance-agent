@@ -1,7 +1,40 @@
+const CATEGORY_PREFIX = {
+    phone: 'PH',
+    idcard: 'ID',
+    bankcard: 'BN',
+    email: 'EM',
+    name: 'NM',
+    company: 'CP',
+    company_name: 'CP',
+    address: 'AD',
+    address_detail: 'AD',
+    bank: 'BK',
+    amount: 'AM',
+    wechat: 'WC',
+    password: 'PW',
+    account: 'AC',
+    ip: 'IP',
+    url: 'URL',
+    contract: 'CT',
+    confidential: 'CF',
+    business_secret: 'BS',
+    finance: 'FN',
+    employee: 'EM',
+    project: 'PJ',
+    bidding: 'BD',
+    customer: 'CS',
+    other: 'OT',
+    chinese_name: 'NM',
+    custom: 'CU'
+};
+
 class DesensitizationProxy {
     constructor() {
         this.mapping = {};
         this.reverseMapping = {};
+        this.keywordMapping = {};
+        this.reverseKeywordMapping = {};
+        this.categoryCounters = {};
         this.counters = {
             phone: 0,
             idcard: 0,
@@ -23,6 +56,7 @@ class DesensitizationProxy {
         };
         this.patterns = [];
         this.loadDefaultPatterns();
+        this.loadKeywordMapping();
     }
 
     loadDefaultPatterns() {
@@ -44,6 +78,37 @@ class DesensitizationProxy {
             { category: 'password', pattern: /(password|密码|passwd|pwd)[\s:=]*[a-zA-Z0-9]{6,}/gi, placeholder: 'PW' },
             { category: 'account', pattern: /(账号|用户名|user|username|login)[\s:=]*[a-zA-Z0-9_]{3,}/gi, placeholder: 'AC' }
         ];
+    }
+
+    loadKeywordMapping() {
+        try {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', 'config/keywords.json', false);
+            xhr.onreadystatechange = () => {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    try {
+                        const config = JSON.parse(xhr.responseText);
+                        if (config.keywords) {
+                            let globalIndex = 1;
+                            Object.keys(config.keywords).forEach(category => {
+                                const prefix = CATEGORY_PREFIX[category] || 'CU';
+                                config.keywords[category].forEach(keyword => {
+                                    const code = `[${prefix}${String(globalIndex).padStart(4, '0')}]`;
+                                    this.keywordMapping[keyword] = code;
+                                    this.reverseKeywordMapping[code] = keyword;
+                                    globalIndex++;
+                                });
+                            });
+                        }
+                    } catch (e) {
+                        console.error('加载关键词配置失败:', e);
+                    }
+                }
+            };
+            xhr.send();
+        } catch (e) {
+            console.warn('关键词配置加载失败，使用默认模式:', e);
+        }
     }
 
     loadConfig(config) {
@@ -74,6 +139,7 @@ class DesensitizationProxy {
     reset() {
         this.mapping = {};
         this.reverseMapping = {};
+        this.categoryCounters = {};
         this.counters = {
             phone: 0, idcard: 0, bank: 0, amount: 0,
             company: 0, name: 0, email: 0, wechat: 0, custom: 0
@@ -93,13 +159,27 @@ class DesensitizationProxy {
     }
 
     generateCode(category, originalValue) {
-        const prefix = category.toUpperCase().substring(0, 2);
-        const length = 8;
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let code;
-        do {
-            code = prefix + Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-        } while (code in this.reverseMapping);
+        const prefix = CATEGORY_PREFIX[category] || 'CU';
+        
+        if (this.keywordMapping[originalValue]) {
+            return this.keywordMapping[originalValue];
+        }
+        
+        if (!this.categoryCounters[category]) {
+            let start = 1;
+            Object.keys(this.keywordMapping).forEach(k => {
+                const code = this.keywordMapping[k];
+                const match = code.match(/^\[([A-Z]+)(\d+)\]$/);
+                if (match && match[1] === prefix) {
+                    start = Math.max(start, parseInt(match[2]) + 1);
+                }
+            });
+            this.categoryCounters[category] = start;
+        }
+        
+        const code = `[${prefix}${String(this.categoryCounters[category]).padStart(4, '0')}]`;
+        this.categoryCounters[category]++;
+        
         return code;
     }
 
@@ -110,11 +190,21 @@ class DesensitizationProxy {
         const originalLength = text.length;
         let result = String(text);
 
-        const commonWords = ['公司', '金额', '日期', '摘要', '标记', '姓名', '电话', '邮箱', '地址', '发票', '报销', '审批', '付款', '收款', '转账', '现金', '银行', '账户', '凭证', '单据', '部门', '项目', '费用', '收入', '支出', '合计', '明细', '报表', '统计', '分析', '说明', '备注', '数量', '单价', '总价', '税率', '税额', '元', '万元', '亿元', '人民币', '结算', '核销', '余额', '流水', '交易', '记录', '编号', '序号', '时间', '月份', '年度', '季度', '期间', '截止', '开始', '结束', '生效', '失效', '期限', '状态', '类型', '类别', '分类', '等级', '级别', '优先级', '重要性', '紧急', '普通', '正常', '异常', '错误', '正确', '成功', '失败', '完成', '未完成', '处理中', '待处理', '已处理', '已审核', '待审核', '已批准', '待批准', '已支付', '待支付', '已收款', '待收款', '已转账', '待转账', '已核销', '待核销', '已归档', '待归档', '已删除', '已作废', '已撤销', '已退回', '已修改', '已更新', '已创建', '已提交', '已接收', '已发送', '已回复', '已确认', '已取消', '已终止', '已暂停', '已恢复', '已延期', '已提前', '已逾期', '已结清', '未结清', '已入账', '待入账', '已出账', '待出账', '已开票', '待开票', '已认证', '待认证', '已抵扣', '待抵扣', '已结转', '待结转', '已分摊', '待分摊', '已计提', '待计提', '已摊销', '待摊销', '已折旧', '待折旧', '已报废', '待报废', '已清理', '待清理', '已处置', '待处置', '已出售', '待出售', '已采购', '待采购', '已入库', '待入库', '已出库', '待出库', '已盘点', '待盘点', '已调整', '待调整', '已更正', '待更正', '已冲销', '待冲销', '已补录', '待补录', '已重算', '待重算', '已复核', '待复核', '已校验', '待校验', '已验证', '待验证', '已测试', '待测试', '已开发', '待开发', '已部署', '待部署', '已上线', '待上线', '已下线', '待下线', '已维护', '待维护', '已升级', '待升级', '已修复', '待修复', '已优化', '待优化', '已改进', '待改进', '已同步', '待同步', '已备份', '待备份', '已重置', '待重置', '已初始化', '待初始化', '已配置', '待配置', '已设置', '待设置', '已保存', '待保存', '已发布', '待发布', '已撤回', '待撤回', '现金', '支付', '金额', '摘要', '日期', '标记', '单号', '凭证', '费用', '收入', '支出', '合计', '明细', '报表', '统计', '分析', '备注', '金额', '数量', '单价', '总价', '税率', '税额', '转账', '结算', '核销', '余额', '流水', '交易', '记录', '单据', '发票', '报销', '审批', '付款', '收款', '银行', '账户', '部门', '项目', '类型', '类别', '状态', '时间', '期间', '年度', '月份', '季度', '开始', '结束', '截止', '生效', '失效', '期限', '完成', '未完成', '处理中', '待处理', '已处理', '已审核', '待审核', '已批准', '待批准', '已支付', '待支付', '已收款', '待收款', '已转账', '待转账', '已核销', '待核销', '已归档', '待归档', '已删除', '已作废', '已撤销', '已退回', '已修改', '已更新', '已创建', '已提交', '已接收', '已发送', '已回复', '已确认', '已取消', '已终止', '已暂停', '已恢复', '已延期', '已提前', '已逾期', '已结清', '未结清', '已入账', '待入账', '已出账', '待出账', '已开票', '待开票', '已认证', '待认证', '已抵扣', '待抵扣', '已结转', '待结转', '已分摊', '待分摊', '已计提', '待计提', '已摊销', '待摊销', '已折旧', '待折旧', '已报废', '待报废', '已清理', '待清理', '已处置', '待处置', '已出售', '待出售', '已采购', '待采购', '已入库', '待入库', '已出库', '待出库', '已盘点', '待盘点', '已调整', '待调整', '已更正', '待更正', '已冲销', '待冲销', '已补录', '待补录', '已重算', '待重算', '已复核', '待复核', '已校验', '待校验'];
+        const sortedKeywords = Object.keys(this.keywordMapping).sort((a, b) => b.length - a.length);
+        sortedKeywords.forEach(keyword => {
+            if (result.includes(keyword)) {
+                const code = this.keywordMapping[keyword];
+                if (!this.mapping[keyword]) {
+                    this.mapping[keyword] = code;
+                    this.reverseMapping[code] = keyword;
+                }
+                result = result.split(keyword).join(code);
+            }
+        });
 
         const sources = this.patterns.map(p => p.pattern.source);
         const combinedPattern = new RegExp(sources.join('|'), 'g');
-        const processed = new Set();
+        const processed = new Set(Object.keys(this.mapping));
 
         const matches = result.match(combinedPattern) || [];
         matches.forEach(matchedStr => {
@@ -128,8 +218,6 @@ class DesensitizationProxy {
                     break;
                 }
             }
-            
-            
             
             processed.add(matchedStr);
             
@@ -182,15 +270,17 @@ class DesensitizationProxy {
         
         let result = String(text);
         
-        const sortedCodes = Object.keys(this.reverseMapping).sort((a, b) => b.length - a.length);
+        const allReverseMapping = { ...this.reverseKeywordMapping, ...this.reverseMapping };
+        
+        const sortedCodes = Object.keys(allReverseMapping).sort((a, b) => b.length - a.length);
         const regexStr = sortedCodes.map(s => this.escapeRegExp(s)).join('|');
         if (regexStr) {
             const replaceRegex = new RegExp(regexStr, 'g');
-            result = result.replace(replaceRegex, (matched) => this.reverseMapping[matched]);
+            result = result.replace(replaceRegex, (matched) => allReverseMapping[matched] || matched);
         }
 
         this.addLog('restore', '数据还原完成', {
-            restoredCount: Object.keys(this.reverseMapping).length
+            restoredCount: Object.keys(allReverseMapping).length
         });
 
         return result;
@@ -201,15 +291,17 @@ class DesensitizationProxy {
         
         let result = String(text);
         
-        const sortedCodes = Object.keys(keyMapping).sort((a, b) => b.length - a.length);
+        const allReverseMapping = { ...this.reverseKeywordMapping, ...this.reverseMapping, ...keyMapping };
+        
+        const sortedCodes = Object.keys(allReverseMapping).sort((a, b) => b.length - a.length);
         const regexStr = sortedCodes.map(s => this.escapeRegExp(s)).join('|');
         if (regexStr) {
             const replaceRegex = new RegExp(regexStr, 'g');
-            result = result.replace(replaceRegex, (matched) => keyMapping[matched] || matched);
+            result = result.replace(replaceRegex, (matched) => allReverseMapping[matched] || matched);
         }
 
         this.addLog('restoreWithKey', '使用密钥文件还原数据完成', {
-            restoredCount: Object.keys(keyMapping).length
+            restoredCount: Object.keys(allReverseMapping).length
         });
 
         return result;

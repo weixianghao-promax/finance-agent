@@ -73,6 +73,31 @@ function desensitizeFileData(rawContent, options) {
             }
             return name.charAt(0) + '*' + name.charAt(name.length - 1) + title;
         });
+        
+        result = result.replace(/([\u4e00-\u9fa5]{2,4})\s*\(\s*[\u4e00-\u9fa5]*\s*\)/g, function(match) {
+            const nameMatch = match.match(/([\u4e00-\u9fa5]{2,4})/);
+            if (nameMatch) {
+                const name = nameMatch[1];
+                if (name.length === 2) {
+                    return name.charAt(0) + '*' + match.substring(2);
+                } else if (name.length === 3) {
+                    return name.charAt(0) + '*' + name.charAt(2) + match.substring(3);
+                } else {
+                    return name.charAt(0) + '**' + name.charAt(name.length - 1) + match.substring(name.length);
+                }
+            }
+            return match;
+        });
+        
+        result = result.replace(/(报销人|经办人|收款人|付款人|负责人|申请人|审批人|联系人)\s*[:：]?\s*([\u4e00-\u9fa5]{2,4})/g, function(match, prefix, name) {
+            if (name.length === 2) {
+                return prefix + '：' + name.charAt(0) + '*';
+            } else if (name.length === 3) {
+                return prefix + '：' + name.charAt(0) + '*' + name.charAt(2);
+            } else {
+                return prefix + '：' + name.charAt(0) + '**' + name.charAt(name.length - 1);
+            }
+        });
     }
 
     if (config.maskWechat) {

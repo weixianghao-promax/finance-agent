@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>港口码头管理方案生成助手</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+    <script src="lib/xlsx.full.min.js"></script>
+    <script src="lib/jszip.min.js"></script>
+    <script src="lib/marked.min.js"></script>
+    <script src="lib/pdf.min.js"></script>
+    <script src="lib/tesseract.min.js"></script>
     <script src="desensitization_proxy.js"></script>
     <script src="desensitize.js"></script>
     <style>
@@ -847,6 +847,7 @@
             try {
                 const result = await callDeepSeekAPI(desensitizedText, isQuickAction, isDesensitizeEnabled, null, desensitizedFileContent);
                 const body = result.body;
+                const cacheKey = result.cacheKey;
                 
                 const reader = body.getReader();
                 const decoder = new TextDecoder();
@@ -906,6 +907,21 @@
                 saveChatHistory();
                 
                 streamMessageDiv.classList.remove('streaming');
+                
+                if (cacheKey) {
+                    setCachedResponse(cacheKey, { body: { getReader: () => {
+                        const data = `data: {"choices":[{"delta":{"content":"${fullResponse.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"}}]}\n\n`;
+                        let pos = 0;
+                        return {
+                            read: () => {
+                                if (pos >= data.length) return Promise.resolve({ done: true, value: null });
+                                const chunk = data.substring(pos, Math.min(pos + 100, data.length));
+                                pos += 100;
+                                return Promise.resolve({ done: pos >= data.length, value: new TextEncoder().encode(chunk) });
+                            }
+                        };
+                    }}, mapping: null, cacheKey: cacheKey });
+                }
                 
                 if (isDesensitizeEnabled && currentMapping && Object.keys(currentMapping).length > 0) {
                     const desensitizedFileName = generateDesensitizedFile(text, uploadedFileContent || '', currentMapping);
@@ -1024,9 +1040,12 @@
         }
 
         let lastRequestTime = 0;
-        const MIN_REQUEST_INTERVAL = 2000;
+        const MIN_REQUEST_INTERVAL = 500;
         let requestCount = 0;
-        const MAX_REQUESTS_PER_MINUTE = 20;
+        const MAX_REQUESTS_PER_MINUTE = 60;
+
+        const requestCache = new Map();
+        const CACHE_TTL = 300000;
 
         function canMakeRequest() {
             const now = Date.now();
@@ -1043,8 +1062,33 @@
             requestCount++;
             return true;
         }
+
+        function getCachedResponse(text) {
+            const cached = requestCache.get(text);
+            if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+                return cached.response;
+            }
+            return null;
+        }
+
+        function setCachedResponse(text, response) {
+            requestCache.set(text, { response, timestamp: Date.now() });
+            if (requestCache.size > 100) {
+                const oldestKey = Array.from(requestCache.keys()).sort((a, b) => 
+                    requestCache.get(a).timestamp - requestCache.get(b).timestamp
+                )[0];
+                requestCache.delete(oldestKey);
+            }
+        }
         
         async function callDeepSeekAPI(text, isQuickAction = false, isDesensitizeEnabled = false, safeData = null, desensitizedFileContent = null) {
+            const cacheKey = text + (desensitizedFileContent ? ':' + desensitizedFileContent.substring(0, 100) : '');
+            const cachedResponse = getCachedResponse(cacheKey);
+            if (cachedResponse) {
+                console.log('使用缓存响应');
+                return cachedResponse;
+            }
+
             if (!canMakeRequest()) {
                 showToast('请求过于频繁，请稍后再试', 'warning');
                 throw new Error('请求频率超限');
@@ -1122,7 +1166,8 @@
                 throw new Error('API调用失败: ' + response.status + ' ' + response.statusText);
             }
 
-            return { body: response.body, mapping: null };
+            const result = { body: response.body, mapping: null, cacheKey: cacheKey };
+            return result;
         }
         
         function generateExcelFile(content) {

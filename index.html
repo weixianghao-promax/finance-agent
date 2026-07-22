@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -791,25 +791,9 @@
                 desensitizationProxy.reset();
             }
             
-            let desensitizedContent = content;
-            if (window.desensitizeFileData) {
-                desensitizedContent = window.desensitizeFileData(content, {
-                    maskPhone: true,
-                    maskIdCard: true,
-                    maskCompanyName: true,
-                    maskContractNo: true,
-                    maskFinanceAmount: false,
-                    maskBankCard: true,
-                    maskEmail: true,
-                    maskName: true,
-                    maskWechat: true,
-                    maskPassword: true,
-                    maskAccount: true
-                });
-            }
-            
-            // 使用 desensitizationProxy 进行代码格式脱敏（返回 [PH0001] 格式）
-            desensitizedContent = desensitizationProxy.desensitize(desensitizedContent);
+            // 直接使用 desensitizationProxy 进行代码格式脱敏，跳过 desensitizeFileData
+            // 避免双层脱敏冲突：先掩码会破坏原始模式，导致无法生成 [PH0001] 代码
+            const desensitizedContent = desensitizationProxy.desensitize(content);
             const mapping = desensitizationProxy.getMapping();
             
             return { desensitizedContent, mapping };
@@ -1175,9 +1159,8 @@
                 { name: '手机号', pattern: /\b1[3-9]\d{9}\b/g },
                 { name: '身份证号', pattern: /\b[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b/g },
                 { name: '银行卡号', pattern: /\b(62\d{14,17}|4\d{15}|5[1-5]\d{14}|3[47]\d{13})\b/g },
-                { name: '邮箱', pattern: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g },
-                { name: '微信号', pattern: /\b[a-zA-Z][a-zA-Z0-9_-]{5,19}\b/g },
-                { name: 'QQ号', pattern: /\b[1-9][0-9]{4,11}\b/g }
+                { name: '邮箱', pattern: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g }
+                // 移除微信号和QQ号模式，因为过于宽泛会误判正常英文单词和数字
             ];
             
             const foundSensitive = [];
@@ -2320,3 +2303,4 @@ ${historySummary}
     </script>
 </body>
 </html>
+

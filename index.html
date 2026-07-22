@@ -1163,6 +1163,13 @@
         function preFlightSecurityCheck(content) {
             if (!content) return { pass: true, found: [] };
             
+            // 调试模式：设置为 true 可跳过安全检查（仅用于开发调试）
+            const DEBUG_MODE = false;
+            if (DEBUG_MODE) {
+                console.log('[SECURITY] 调试模式：跳过预飞检查');
+                return { pass: true, found: [] };
+            }
+            
             const sensitivePatterns = [
                 { name: '手机号', pattern: /\b1[3-9]\d{9}\b/g },
                 { name: '身份证号', pattern: /\b[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b/g },
@@ -1177,7 +1184,20 @@
             for (const { name, pattern } of sensitivePatterns) {
                 const matches = content.match(pattern);
                 if (matches && matches.length > 0) {
-                    foundSensitive.push({ name, count: matches.length, examples: matches.slice(0, 3) });
+                    // 过滤脱敏代码格式（如 [PH0001]）
+                    const filteredMatches = matches.filter(match => {
+                        // 检查是否是脱敏代码格式 [XX0001]
+                        const isDesensitizeCode = /^\[[A-Z]{2,4}\d{4}\]$/.test(match);
+                        // 检查是否在脱敏代码内部（被方括号包围）
+                        const matchIndex = content.indexOf(match);
+                        const context = content.substring(Math.max(0, matchIndex - 2), matchIndex + match.length + 2);
+                        const isInsideDesensitizeCode = /\[[A-Z]{2,4}\d{4}\]/.test(context);
+                        return !isDesensitizeCode && !isInsideDesensitizeCode;
+                    });
+                    
+                    if (filteredMatches.length > 0) {
+                        foundSensitive.push({ name, count: filteredMatches.length, examples: filteredMatches.slice(0, 3) });
+                    }
                 }
             }
             

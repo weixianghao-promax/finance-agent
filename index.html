@@ -808,7 +808,8 @@
                 });
             }
             
-            desensitizationProxy.desensitize(desensitizedContent);
+            // 使用 desensitizationProxy 进行代码格式脱敏（返回 [PH0001] 格式）
+            desensitizedContent = desensitizationProxy.desensitize(desensitizedContent);
             const mapping = desensitizationProxy.getMapping();
             
             return { desensitizedContent, mapping };

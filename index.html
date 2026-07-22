@@ -293,6 +293,7 @@
         let chatHistory = loadChatHistory();
         let uploadedFileContent = null;
         let uploadedFileName = null;
+        let uploadedFileMapping = {};
         let desensitizationMapping = {};
         let selectedFormat = 'auto';
         const messagesContainer = document.getElementById('chat-messages');
@@ -534,28 +535,14 @@
                 const content = await readFileContent(file);
                 const fileHash = await generateFileHash(content);
                 
-                let desensitizedFullContent = content;
-                if (window.desensitizeFileData) {
-                    desensitizedFullContent = window.desensitizeFileData(content, {
-                        maskPhone: true, maskIdCard: true, maskCompanyName: true,
-                        maskContractNo: true, maskFinanceAmount: false, maskBankCard: true,
-                        maskEmail: true, maskName: true, maskWechat: true,
-                        maskPassword: true, maskAccount: true
-                    });
-                }
+                const desensitizeResult = await desensitizeContent(content);
+                const desensitizedFullContent = desensitizeResult.desensitizedContent;
+                uploadedFileMapping = desensitizeResult.mapping;
                 
                 uploadedFileContent = desensitizedFullContent;
                 uploadedFileName = file.name;
 
-                const safePreview = window.desensitizeFileData
-                    ? window.desensitizeFileData(content.length > 500 ? content.substring(0, 500) + '...（内容已截断，完整内容已自动脱敏处理）' : content, {
-                        maskPhone: true, maskIdCard: true, maskCompanyName: true,
-                        maskContractNo: true, maskFinanceAmount: false, maskBankCard: true,
-                        maskEmail: true, maskName: true, maskWechat: true,
-                        maskPassword: true, maskAccount: true
-                    })
-                    : (content.length > 500 ? content.substring(0, 500) + '...（内容已截断）' : content);
-                const previewContent = displayDesensitize(safePreview);
+                const previewContent = displayDesensitize(desensitizedFullContent.length > 500 ? desensitizedFullContent.substring(0, 500) + '...（内容已截断，完整内容已自动脱敏处理）' : desensitizedFullContent);
 
                 logUpload(file.name, file.size, fileHash, true);
                 
@@ -824,18 +811,21 @@
             const isDesensitizeEnabled = true;
             
             let desensitizedText = text;
-            let desensitizedFileContent = uploadedFileContent;
-            let currentMapping = null;
+            let desensitizedFileContent = null;
+            let currentMapping = {};
             
             if (isDesensitizeEnabled) {
                 if (text) {
                     const result = await desensitizeContent(text);
                     desensitizedText = result.desensitizedContent;
-                    currentMapping = result.mapping;
+                    Object.assign(currentMapping, result.mapping);
                 }
                 if (uploadedFileContent) {
                     desensitizedFileContent = truncateContent(uploadedFileContent, 8000);
+                    Object.assign(currentMapping, uploadedFileMapping);
                 }
+            } else {
+                desensitizedFileContent = uploadedFileContent ? truncateContent(uploadedFileContent, 8000) : null;
             }
             
             addMessage(text, 'user', null, isDesensitizeEnabled);
@@ -1176,6 +1166,37 @@
             }
         }
         
+        function preFlightSecurityCheck(content) {
+            if (!content) return { pass: true, found: [] };
+            
+            const sensitivePatterns = [
+                { name: '手机号', pattern: /1[3-9]\d{9}/g },
+                { name: '身份证号', pattern: /[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]/g },
+                { name: '银行卡号', pattern: /\b(62\d{14,17}|4\d{15}|5[1-5]\d{14}|3[47]\d{13})\b/g },
+                { name: '邮箱', pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g },
+                { name: '微信号', pattern: /^[a-zA-Z][a-zA-Z0-9_-]{5,19}$/gm },
+                { name: 'QQ号', pattern: /[1-9][0-9]{4,11}/g },
+                { name: '姓名', pattern: /[\u4e00-\u9fa5]{2,4}/g },
+                { name: '公司名', pattern: /[\u4e00-\u9fa5]{2,}公司/g }
+            ];
+            
+            const foundSensitive = [];
+            
+            for (const { name, pattern } of sensitivePatterns) {
+                const matches = content.match(pattern);
+                if (matches && matches.length > 0) {
+                    foundSensitive.push({ name, count: matches.length, examples: matches.slice(0, 3) });
+                }
+            }
+            
+            if (foundSensitive.length > 0) {
+                console.warn('[SECURITY] 预飞检查发现敏感信息:', foundSensitive);
+                return { pass: false, found: foundSensitive };
+            }
+            
+            return { pass: true, found: [] };
+        }
+        
         async function callDeepSeekAPI(text, isQuickAction = false, isDesensitizeEnabled = false, safeData = null, desensitizedFileContent = null) {
             const cacheKey = text + (desensitizedFileContent ? ':' + desensitizedFileContent.substring(0, 100) : '');
             const cachedResponse = getCachedResponse(cacheKey);
@@ -1214,6 +1235,14 @@
             if (desensitizedFileContent) {
                 fullUserMessage = "文件内容：\n" + desensitizedFileContent + "\n\n问题：" + userContent;
             }
+
+            const securityCheck = preFlightSecurityCheck(fullUserMessage);
+            if (!securityCheck.pass) {
+                console.error('[SECURITY] 预飞检查失败，发现敏感信息:', securityCheck.found);
+                showToast('安全检查失败：请求中包含敏感信息，已阻止发送', 'error');
+                throw new Error('安全检查失败：发现敏感信息');
+            }
+            console.log('[SECURITY] 预飞检查通过');
 
             const recentHistory = chatHistory.slice(-1);
             const historyToSend = recentHistory.map(function(h) {

@@ -859,7 +859,7 @@
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 };
                 
-                renderInterval = setInterval(renderContent, 30);
+                renderInterval = setInterval(renderContent, 100);
                 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -977,15 +977,15 @@
         }
         
         const FORMAT_TEMPLATES = {
-            finance: `\n\n请按照以下财务单据格式输出：\n\n### 1. 单据基础信息区\n单据编号：XXX\n单据日期：YYYY-MM-DD\n审批人：XXX\n归属部门：XXX\n填报人：XXX\n填报日期：YYYY-MM-DD\n\n### 2. 核心费用明细区\n| 序号 | 费用事由 | 金额（元） | 支付方式 | 备注 |\n| --- | --- | --- | --- | --- |\n| 1 | 事由1 | 金额1 | 支付方式1 | 备注1 |\n\n### 3. 合计汇总区\n小写金额：￥XXX.XX元\n大写金额：XXX元整\n\n### 4. 异常备注区\n无异常`,
+            finance: '\n\n输出财务单据格式：基础信息、费用明细表格、合计汇总、异常备注。',
             
-            hr_recruitment: `\n\n请按照以下人事招收方案格式输出：\n\n### 1. 岗位需求分析区\n岗位名称：XXX\n岗位类别：[管理岗/技术岗/操作岗/后勤岗]\n需求人数：X人\n岗位职责：XXX\n任职要求：XXX\n\n### 2. 招聘流程区\n| 招聘阶段 | 时间安排 | 主要任务 |\n| --- | --- | --- |\n| 简历筛选 | 第1-3天 | 筛选符合条件的简历 |\n| 面试评估 | 第4-7天 | 进行初试和复试 |\n| 录用通知 | 第8天 | 发放录用通知 |\n| 入职培训 | 第9-14天 | 进行岗前培训 |\n\n### 3. 面试评估标准区\n| 评估维度 | 权重 | 评分标准 |\n| --- | --- | --- |\n| 专业技能 | 30% | 相关工作经验和专业知识 |\n| 综合素质 | 25% | 沟通能力、团队协作、责任心 |\n| 岗位匹配度 | 25% | 性格特点与岗位要求的匹配程度 |\n| 发展潜力 | 20% | 学习能力和职业发展潜力 |\n\n### 4. 备注区\n备注信息：XXX`,
+            hr_recruitment: '\n\n输出人事招聘方案：岗位需求、招聘流程表格、评估标准表格、备注。',
             
-            internship: `\n\n请按照以下实习方案格式输出：\n\n### 1. 实习生基本信息区\n姓名：XXX\n专业：XXX\n性格特点：XXX\n实习岗位：XXX\n实习周期：XXX\n\n### 2. 岗位匹配分析区\n性格特点分析：XXX\n推荐岗位：XXX\n匹配理由：XXX\n\n### 3. 培训计划区\n| 阶段 | 时间 | 培训内容 |\n| --- | --- | --- |\n| 第一阶段 | 第1-2周 | 公司概况、安全培训、岗位认知 |\n| 第二阶段 | 第3-4周 | 专业技能培训、导师带教 |\n| 第三阶段 | 第5-8周 | 独立工作实践、项目参与 |\n\n### 4. 考核标准区\n| 考核维度 | 权重 | 考核方式 |\n| --- | --- | --- |\n| 工作态度 | 30% | 日常表现、出勤情况 |\n| 专业技能 | 35% | 实操考核、技能测试 |\n| 团队协作 | 20% | 同事评价、团队项目表现 |\n| 综合能力 | 15% | 实习总结报告、答辩 |`,
+            internship: '\n\n输出实习方案：基本信息、岗位匹配分析、培训计划表格、考核标准表格。',
             
-            safety: `\n\n参考法规（知识截止日期：2024年）：\n- 《中华人民共和国港口法》\n- 《港口危险货物安全管理规定》\n- 《港口设施保安规则》\n- 《广东省港口条例》\n- 《广东省安全生产条例》\n- 《起重机械安全规程》(GB 6067.1)\n- 《场(厂)内专用机动车辆安全技术规程》(GB/T 10827)\n\n请按照以下安全生产方案格式输出：\n\n### 1. 设备/岗位信息区\n设备类型：[吊机/叉车/铲车/装卸人员]\n风险等级：[高/中/低]\n适用范围：XXX\n\n### 2. 安全操作规程区\n| 操作步骤 | 安全要求 |\n| --- | --- |\n| 步骤1 | 安全要求1 |\n| 步骤2 | 安全要求2 |\n| 步骤3 | 安全要求3 |\n\n### 3. 安全风险与防控区\n| 风险类型 | 风险描述 | 防控措施 |\n| --- | --- | --- |\n| 风险1 | 风险描述1 | 防控措施1 |\n| 风险2 | 风险描述2 | 防控措施2 |\n\n### 4. 应急预案区\n| 应急事件 | 应急措施 | 责任人员 |\n| --- | --- | --- |\n| 事件1 | 措施1 | 责任人1 |\n| 事件2 | 措施2 | 责任人2 |`,
+            safety: '\n\n输出安全生产方案：设备信息、操作规程表格、风险防控表格、应急预案表格。',
             
-            image_analysis: `\n\n请分析以下图片识别内容：\n1. 内容摘要：简要概括图片中的核心内容\n2. 分类标签：财务票据/安全文档/人事资料/合同协议/物流单据/行政通知/其他\n3. 关键信息提取：提取图片中的重要数据和信息\n4. 整理建议：针对该类型文档的整理建议\n\n请使用Markdown格式输出。`
+            image_analysis: '\n\n分析图片内容：内容摘要、分类标签、关键信息、整理建议。用Markdown输出。'
         };
         
         function detectRequestType(text) {
@@ -1015,7 +1015,7 @@
             return null;
         }
         
-        function truncateContent(content, maxLength = 8000) {
+        function truncateContent(content, maxLength = 3000) {
             if (!content || content.length <= maxLength) {
                 return content;
             }
@@ -1087,18 +1087,13 @@
 
             const messages = [{
                 role: 'system',
-                content: '你是港口码头财务管理助手，直接回答问题，简洁专业，不超过300字。'
+                content: '港口财务助手，简洁专业回答。'
             }];
-
-            for (const h of historyToSend) {
-                if (h.user) messages.push({ role: 'user', content: h.user });
-                if (h.assistant) messages.push({ role: 'assistant', content: h.assistant });
-            }
 
             messages.push({ role: 'user', content: fullUserMessage });
 
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
 
             const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
                 method: 'POST',
@@ -1110,9 +1105,9 @@
                     model: 'doubao-seed-2-1-turbo-260628',
                     messages: messages,
                     stream: true,
-                    temperature: 0.1,
-                    top_p: 0.5,
-                    max_tokens: 1000,
+                    temperature: 0.01,
+                    top_p: 0.3,
+                    max_tokens: 500,
                     presence_penalty: 0,
                     frequency_penalty: 0
                 }),

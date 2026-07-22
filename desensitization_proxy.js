@@ -38,7 +38,6 @@ class DesensitizationProxy {
             { category: 'name2', pattern: /([\u4e00-\u9fa5]{2,4})\s*\(/g, placeholder: 'NM' },
             { category: 'name3', pattern: /(报销人|经办人|收款人|付款人|负责人|申请人|审批人|联系人)\s*[:：]?\s*([\u4e00-\u9fa5]{2,4})/g, placeholder: 'NM' },
             { category: 'name4', pattern: /([\u4e00-\u9fa5]{2,4})\s*\)/g, placeholder: 'NM' },
-            { category: 'name5', pattern: /[\u4e00-\u9fa5]{2,4}/g, placeholder: 'NM' },
             { category: 'wechat', pattern: /(微信号|微信|WeChat|wechat)\s*[:：]?\s*([a-zA-Z0-9_-]{5,})/g, placeholder: 'WC' },
             { category: 'ip', pattern: /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g, placeholder: 'IP' },
             { category: 'url', pattern: /https?:\/\/[\w\-._~:/?#@!$&'()*+,;=%\\[\]]+/g, placeholder: 'URL' },
@@ -130,9 +129,7 @@ class DesensitizationProxy {
                 }
             }
             
-            if (category === 'name5' && commonWords.includes(matchedStr)) {
-                return;
-            }
+            
             
             processed.add(matchedStr);
             

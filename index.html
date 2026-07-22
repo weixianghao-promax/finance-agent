@@ -71,6 +71,11 @@
         .desensitize-toggle input[type="checkbox"]:checked + .toggle-slider { background: #68d391; }
         .desensitize-toggle input[type="checkbox"]:checked + .toggle-slider::before { transform: translateX(20px); }
         .toggle-label { margin-left: 8px; color: rgba(255,255,255,0.8); font-size: 14px; }
+        .cot-toggle { display: flex; align-items: center; cursor: pointer; margin-left: 10px; }
+        .cot-toggle input[type="checkbox"] { display: none; }
+        .cot-toggle .toggle-slider::before { background: #ffc107; }
+        .cot-toggle input[type="checkbox"]:checked + .toggle-slider { background: #ff9800; }
+        .cot-toggle input[type="checkbox"]:checked + .toggle-slider::before { transform: translateX(20px); }
         .security-section { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); }
         .security-section h3 { color: #68d391; margin-bottom: 10px; font-size: 15px; }
         .security-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 8px; background: rgba(0,0,0,0.2); border-radius: 8px; }
@@ -180,6 +185,11 @@
                     <button class="format-btn word" onclick="selectFormat('word')" id="format-word">📝 Word</button>
                     <button class="format-btn markdown" onclick="selectFormat('markdown')" id="format-markdown">📋 Markdown</button>
                     <button class="format-btn txt" onclick="selectFormat('txt')" id="format-txt">📄 TXT</button>
+                    <span class="cot-toggle" style="margin-left: 20px;">
+                        <input type="checkbox" id="cot-toggle" />
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">🧠 思考过程</span>
+                    </span>
                 </div>
                 <div class="input-container">
                     <button class="upload-btn" id="upload-btn">📁 上传文件</button>
@@ -862,73 +872,108 @@
             
             try {
                 const result = await callDeepSeekAPI(desensitizedText, isQuickAction, isDesensitizeEnabled, null, desensitizedFileContent);
-                const body = result.body;
-                const cacheKey = result.cacheKey;
                 
-                const reader = body.getReader();
-                const decoder = new TextDecoder();
-                
-                const renderContent = () => {
-                    if (!pendingRender) return;
-                    pendingRender = false;
+                if (result.responseType === 'cached') {
+                    console.log('使用缓存响应');
+                    fullResponse = result.content;
+                    thinkingContent = result.thinkingContent || '';
+                    answerContent = result.answerContent || '';
+                    inThinking = !answerContent;
                     
                     const thinkingDiv = thinkingContainer.querySelector('.thinking-content');
                     const thinkingHeader = thinkingContainer.querySelector('.thinking-header');
                     
-                    if (thinkingContent && inThinking) {
+                    if (thinkingContent && thinkingContent.trim().replace('[思考]', '').trim()) {
                         thinkingContainer.style.display = 'block';
-                        thinkingDiv.innerHTML = displayDesensitize(marked.parse(thinkingContent));
+                        thinkingDiv.innerHTML = displayDesensitize(marked.parse(thinkingContent.replace('[思考]', '').trim()));
                         thinkingHeader.classList.add('expanded');
                         thinkingHeader.querySelector('.toggle-icon').textContent = '▼';
-                    } else if (thinkingContent && !inThinking) {
-                        thinkingContainer.style.display = 'block';
+                    } else {
+                        thinkingContainer.style.display = 'none';
                     }
                     
-                    if (!inThinking) {
-                        streamContent.innerHTML = displayDesensitize(marked.parse(answerContent));
-                    } else if (!thinkingContent) {
-                        streamContent.innerHTML = displayDesensitize(marked.parse(fullResponse));
-                    }
-                    
+                    streamContent.innerHTML = displayDesensitize(marked.parse((answerContent || fullResponse).replace('[回答]', '').trim()));
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                };
-                
-                renderInterval = setInterval(renderContent, 100);
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+                } else {
+                    const body = result.body;
+                    const cacheKey = result.cacheKey;
                     
-                    const chunk = decoder.decode(value, { stream: true });
-                    const lines = chunk.split('\n');
+                    const reader = body.getReader();
+                    const decoder = new TextDecoder();
                     
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = line.substring(6).trim();
-                            if (data === '[DONE]') continue;
-                            try {
-                                const json = JSON.parse(data);
-                                const content = json.choices?.[0]?.delta?.content || '';
-                                if (content) {
-                                    fullResponse += content;
-                                    
-                                    if (inThinking) {
-                                        if (content.includes('[回答]')) {
-                                            const parts = content.split('[回答]');
-                                            thinkingContent += parts[0];
-                                            answerContent = parts[1] || '';
-                                            inThinking = false;
-                                        } else {
-                                            thinkingContent += content;
-                                        }
-                                    } else {
-                                        answerContent += content;
+                    const renderContent = () => {
+                        if (!pendingRender) return;
+                        pendingRender = false;
+                        
+                        const thinkingDiv = thinkingContainer.querySelector('.thinking-content');
+                        const thinkingHeader = thinkingContainer.querySelector('.thinking-header');
+                        
+                        if (thinkingContent && inThinking) {
+                            thinkingContainer.style.display = 'block';
+                            thinkingDiv.innerHTML = displayDesensitize(marked.parse(thinkingContent));
+                            thinkingHeader.classList.add('expanded');
+                            thinkingHeader.querySelector('.toggle-icon').textContent = '▼';
+                        } else if (thinkingContent && !inThinking) {
+                            thinkingContainer.style.display = 'block';
+                        }
+                        
+                        if (!inThinking) {
+                            streamContent.innerHTML = displayDesensitize(marked.parse(answerContent));
+                        } else if (!thinkingContent) {
+                            streamContent.innerHTML = displayDesensitize(marked.parse(fullResponse));
+                        }
+                        
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    };
+                    
+                    renderInterval = setInterval(renderContent, 100);
+                    
+                    let buffer = '';
+                    
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        const chunk = decoder.decode(value, { stream: true });
+                        buffer += chunk;
+                        
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const data = line.substring(6).trim();
+                                if (data === '[DONE]') continue;
+                                try {
+                                    let json;
+                                    try {
+                                        json = JSON.parse(data);
+                                    } catch (parseError) {
+                                        const fixedData = fixJsonString(data);
+                                        json = JSON.parse(fixedData);
                                     }
-                                    
-                                    pendingRender = true;
+                                    const content = json.choices?.[0]?.delta?.content || '';
+                                    if (content) {
+                                        fullResponse += content;
+                                        
+                                        if (inThinking) {
+                                            if (content.includes('[回答]')) {
+                                                const parts = content.split('[回答]');
+                                                thinkingContent += parts[0];
+                                                answerContent = parts[1] || '';
+                                                inThinking = false;
+                                            } else {
+                                                thinkingContent += content;
+                                            }
+                                        } else {
+                                            answerContent += content;
+                                        }
+                                        
+                                        pendingRender = true;
+                                    }
+                                } catch (e) {
+                                    console.warn('解析流式响应失败:', e);
                                 }
-                            } catch (e) {
-                                console.warn('解析流式响应失败:', e);
                             }
                         }
                     }
@@ -970,18 +1015,7 @@
                 streamMessageDiv.classList.remove('streaming');
                 
                 if (cacheKey) {
-                    setCachedResponse(cacheKey, { body: { getReader: () => {
-                        const data = `data: {"choices":[{"delta":{"content":"${fullResponse.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"}}]}\n\n`;
-                        let pos = 0;
-                        return {
-                            read: () => {
-                                if (pos >= data.length) return Promise.resolve({ done: true, value: null });
-                                const chunk = data.substring(pos, Math.min(pos + 100, data.length));
-                                pos += 100;
-                                return Promise.resolve({ done: pos >= data.length, value: new TextEncoder().encode(chunk) });
-                            }
-                        };
-                    }}, mapping: null, cacheKey: cacheKey });
+                    setCachedResponse(cacheKey, { responseType: 'cached', content: fullResponse, thinkingContent: thinkingContent, answerContent: answerContent, cacheKey: cacheKey });
                 }
                 
                 if (isDesensitizeEnabled && currentMapping && Object.keys(currentMapping).length > 0) {
@@ -1190,9 +1224,19 @@
                 };
             }).filter(h => h.user || h.assistant);
 
+            const cotEnabled = document.getElementById('cot-toggle')?.checked || false;
+            
+            let systemPrompt = '港口财务助手，简洁专业回答。';
+            let maxTokens = 500;
+            
+            if (cotEnabled) {
+                systemPrompt = '先简述分析思路，再回答。用[思考]和[回答]标记分隔。';
+                maxTokens = 800;
+            }
+
             const messages = [{
                 role: 'system',
-                content: '你是港口财务助手。请先进行思考分析，然后给出最终回答。输出格式要求：先用[思考]标记开始思考过程，描述你的分析步骤；再用[回答]标记开始最终回答。例如：[思考]用户问的是关于财务报表的问题，我需要分析数据并提供专业建议。[回答]根据数据分析，以下是财务报表分析结果...'
+                content: systemPrompt
             }];
 
             messages.push({ role: 'user', content: fullUserMessage });
@@ -1212,7 +1256,7 @@
                     stream: true,
                     temperature: 0.01,
                     top_p: 0.3,
-                    max_tokens: 500,
+                    max_tokens: maxTokens,
                     presence_penalty: 0,
                     frequency_penalty: 0
                 }),
@@ -1706,6 +1750,40 @@
         
         function removeTypingIndicator(element) {
             if (element && element.parentNode) element.parentNode.removeChild(element);
+        }
+        
+        function fixJsonString(str) {
+            str = str.replace(/\\'/g, "'");
+            str = str.replace(/'([^']*)'/g, '"$1"');
+            
+            let result = '';
+            let inString = false;
+            let escape = false;
+            
+            for (let i = 0; i < str.length; i++) {
+                const char = str[i];
+                
+                if (escape) {
+                    result += char;
+                    escape = false;
+                } else if (char === '\\') {
+                    result += char;
+                    escape = true;
+                } else if (char === '"') {
+                    inString = !inString;
+                    result += char;
+                } else if (char === '\n' && inString) {
+                    result += '\\n';
+                } else if (char === '\r' && inString) {
+                    result += '\\r';
+                } else if (char === '\t' && inString) {
+                    result += '\\t';
+                } else {
+                    result += char;
+                }
+            }
+            
+            return result;
         }
         
         function toggleThinking(header) {

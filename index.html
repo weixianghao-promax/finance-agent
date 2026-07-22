@@ -546,7 +546,7 @@
 
                 logUpload(file.name, file.size, fileHash, true);
                 
-                addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: SHA-256\n\n预览：\n```\n' + previewContent + '\n```\n\n您可以提问了。', 'assistant');
+                addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: SHA-256\n\n预览：\n```\n' + previewContent + '\n```\n\n📥 [下载脱敏文件](' + generateDownloadLink(desensitizedFullContent, file.name) + ') | 📥 [下载密钥文件](' + generateKeyFile(uploadedFileMapping) + ')\n\n您可以提问了。', 'assistant');
             } catch (error) {
                 logUpload(file.name || 'unknown', 0, '', false);
                 addMessage('❌ 文件上传失败：' + error.message + '\n请尝试将文件内容复制为文本后重新上传。', 'assistant');
@@ -776,10 +776,12 @@
             }
         }
         
-        async function desensitizeContent(content) {
-            if (!content) return content;
+        async function desensitizeContent(content, preserveMapping = false) {
+            if (!content) return { desensitizedContent: content, mapping: {} };
             
-            desensitizationProxy.reset();
+            if (!preserveMapping) {
+                desensitizationProxy.reset();
+            }
             
             let desensitizedContent = content;
             if (window.desensitizeFileData) {
@@ -815,14 +817,14 @@
             let currentMapping = {};
             
             if (isDesensitizeEnabled) {
-                if (text) {
-                    const result = await desensitizeContent(text);
-                    desensitizedText = result.desensitizedContent;
-                    Object.assign(currentMapping, result.mapping);
-                }
                 if (uploadedFileContent) {
                     desensitizedFileContent = truncateContent(uploadedFileContent, 8000);
                     Object.assign(currentMapping, uploadedFileMapping);
+                }
+                if (text) {
+                    const result = await desensitizeContent(text, true);
+                    desensitizedText = result.desensitizedContent;
+                    Object.assign(currentMapping, result.mapping);
                 }
             } else {
                 desensitizedFileContent = uploadedFileContent ? truncateContent(uploadedFileContent, 8000) : null;
@@ -1170,14 +1172,12 @@
             if (!content) return { pass: true, found: [] };
             
             const sensitivePatterns = [
-                { name: '手机号', pattern: /1[3-9]\d{9}/g },
-                { name: '身份证号', pattern: /[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]/g },
+                { name: '手机号', pattern: /\b1[3-9]\d{9}\b/g },
+                { name: '身份证号', pattern: /\b[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]\b/g },
                 { name: '银行卡号', pattern: /\b(62\d{14,17}|4\d{15}|5[1-5]\d{14}|3[47]\d{13})\b/g },
-                { name: '邮箱', pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g },
-                { name: '微信号', pattern: /^[a-zA-Z][a-zA-Z0-9_-]{5,19}$/gm },
-                { name: 'QQ号', pattern: /[1-9][0-9]{4,11}/g },
-                { name: '姓名', pattern: /[\u4e00-\u9fa5]{2,4}/g },
-                { name: '公司名', pattern: /[\u4e00-\u9fa5]{2,}公司/g }
+                { name: '邮箱', pattern: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g },
+                { name: '微信号', pattern: /\b[a-zA-Z][a-zA-Z0-9_-]{5,19}\b/g },
+                { name: 'QQ号', pattern: /\b[1-9][0-9]{4,11}\b/g }
             ];
             
             const foundSensitive = [];
@@ -1302,6 +1302,27 @@
 
             const result = { body: response.body, mapping: null, cacheKey: cacheKey };
             return result;
+        }
+        
+        function generateDownloadLink(content, fileName) {
+            const ext = fileName.split('.').pop().toLowerCase();
+            let blob;
+            let downloadFileName = 'desensitized_' + fileName;
+            
+            if (['xlsx', 'xls'].includes(ext)) {
+                const wb = XLSX.read(content, { type: 'binary' });
+                const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            } else if (['docx', 'doc'].includes(ext)) {
+                blob = new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+            } else {
+                blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                downloadFileName = 'desensitized_' + fileName.replace(/\.[^.]+$/, '.txt');
+            }
+            
+            const url = URL.createObjectURL(blob);
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            return url;
         }
         
         function generateExcelFile(content) {

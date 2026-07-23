@@ -7,6 +7,13 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>港口码头管理方案生成助手</title>
+    <!-- 预连接到API端点，减少首次请求延迟 -->
+    <link rel="preconnect" href="https://ark.cn-guangzhou.volces.com" crossorigin>
+    <link rel="preconnect" href="https://ark.hk-hongkong.volces.com" crossorigin>
+    <link rel="preconnect" href="https://ark.cn-shenzhen.volces.com" crossorigin>
+    <link rel="preconnect" href="https://ark.cn-shanghai.volces.com" crossorigin>
+    <link rel="preconnect" href="https://ark.cn-beijing.volces.com" crossorigin>
+    <link rel="preconnect" href="https://ark.ap-singapore.volces.com" crossorigin>
     <script src="lib/xlsx.full.min.js?v=20260722"></script>
     <script src="lib/jszip.min.js?v=20260722"></script>
     <script src="lib/marked.min.js?v=20260722"></script>
@@ -1105,12 +1112,33 @@
         }
 
         let lastRequestTime = 0;
-        const MIN_REQUEST_INTERVAL = 500;
+        const MIN_REQUEST_INTERVAL = 200;
         let requestCount = 0;
         const MAX_REQUESTS_PER_MINUTE = 60;
 
         const requestCache = new Map();
-        const CACHE_TTL = 300000;
+        const CACHE_TTL = 1800000; // 30分钟
+        const MAX_CACHE_SIZE = 500;
+
+        // 计算两个字符串的相似度（Levenshtein距离）
+        function calculateSimilarity(str1, str2) {
+            const len1 = str1.length;
+            const len2 = str2.length;
+            const dp = Array(len1 + 1).fill(null).map(() => Array(len2 + 1).fill(null));
+            
+            for (let i = 0; i <= len1; i++) dp[i][0] = i;
+            for (let j = 0; j <= len2; j++) dp[0][j] = j;
+            
+            for (let i = 1; i <= len1; i++) {
+                for (let j = 1; j <= len2; j++) {
+                    const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+                    dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+                }
+            }
+            
+            const maxLen = Math.max(len1, len2);
+            return 1 - (dp[len1][len2] / maxLen);
+        }
 
         function canMakeRequest() {
             const now = Date.now();
@@ -1129,16 +1157,31 @@
         }
 
         function getCachedResponse(text) {
+            // 精确匹配
             const cached = requestCache.get(text);
             if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
                 return cached.response;
             }
+            
+            // 模糊匹配：相似度超过80%的问题返回相同答案
+            const SIMILARITY_THRESHOLD = 0.8;
+            for (const [key, value] of requestCache) {
+                if (Date.now() - value.timestamp < CACHE_TTL) {
+                    const similarity = calculateSimilarity(text, key);
+                    if (similarity >= SIMILARITY_THRESHOLD) {
+                        console.log('[CACHE] 模糊匹配命中:', similarity.toFixed(2), '原始:', key);
+                        return value.response;
+                    }
+                }
+            }
+            
             return null;
         }
 
         function setCachedResponse(text, response) {
             requestCache.set(text, { response, timestamp: Date.now() });
-            if (requestCache.size > 100) {
+            // 超过最大缓存数量时，删除最旧的缓存
+            if (requestCache.size > MAX_CACHE_SIZE) {
                 const oldestKey = Array.from(requestCache.keys()).sort((a, b) => 
                     requestCache.get(a).timestamp - requestCache.get(b).timestamp
                 )[0];
@@ -1347,7 +1390,9 @@
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
-                                'Authorization': 'Bearer ' + apiKey
+                                'Authorization': 'Bearer ' + apiKey,
+                                'Connection': 'keep-alive',
+                                'Keep-Alive': 'timeout=60, max=100'
                             },
                             body: JSON.stringify({
                                 model: 'doubao-seed-2-1-turbo-260628',

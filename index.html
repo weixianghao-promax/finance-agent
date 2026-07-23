@@ -857,8 +857,9 @@
             
             try {
                 const result = await callDeepSeekAPI(desensitizedText, isQuickAction, isDesensitizeEnabled, desensitizedText, desensitizedFileContent);
-                
-                if (result.responseType === 'cached') {
+            const cacheKey = result.cacheKey || null;
+            
+            if (result.responseType === 'cached') {
                     console.log('使用缓存响应');
                     fullResponse = result.content;
                     thinkingContent = result.thinkingContent || '';
@@ -881,7 +882,6 @@
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 } else {
                     const body = result.body;
-                    const cacheKey = result.cacheKey;
                     
                     const reader = body.getReader();
                     const decoder = new TextDecoder();

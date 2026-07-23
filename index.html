@@ -55,7 +55,8 @@
         .thinking-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(255, 193, 7, 0.15); border-radius: 12px 12px 0 0; cursor: pointer; color: #ffc107; font-size: 13px; font-weight: 500; transition: background 0.3s; }
         .thinking-header:hover { background: rgba(255, 193, 7, 0.25); }
         .thinking-header .toggle-icon { font-size: 10px; transition: transform 0.3s; }
-        .thinking-header.collapsed .toggle-icon { transform: rotate(-90deg); }
+        .thinking-header.expanded .toggle-icon { transform: rotate(0deg); }
+        .thinking-header:not(.expanded) .toggle-icon { transform: rotate(-90deg); }
         .thinking-content { padding: 12px; background: rgba(255, 193, 7, 0.08); border-radius: 0 0 12px 12px; color: rgba(255,255,255,0.85); font-size: 14px; line-height: 1.6; border-top: 1px solid rgba(255, 193, 7, 0.2); }
         .thinking-content p { margin: 0 0 8px 0; }
         .thinking-content p:last-child { margin-bottom: 0; }
@@ -1298,11 +1299,14 @@
             const cotEnabled = document.getElementById('cot-toggle')?.checked || false;
             
             let systemPrompt = '港口财务助手，简洁专业回答。';
-            let maxTokens = 300;
+            let maxTokens = 800;
             
             if (cotEnabled) {
                 systemPrompt = '先简述分析思路，再回答。用[思考]和[回答]标记分隔。';
-                maxTokens = 300;
+                maxTokens = 800;
+            } else {
+                // 默认也启用思考过程，确保[思考]和[回答]标记被输出
+                systemPrompt = '先简述分析思路，再回答。用[思考]和[回答]标记分隔。';
             }
 
             const messages = [{
@@ -2022,14 +2026,14 @@
             const content = header.nextElementSibling;
             const icon = header.querySelector('.toggle-icon');
             
-            if (header.classList.contains('collapsed')) {
-                header.classList.remove('collapsed');
-                content.style.display = 'block';
-                icon.textContent = '▼';
-            } else {
-                header.classList.add('collapsed');
+            if (header.classList.contains('expanded')) {
+                header.classList.remove('expanded');
                 content.style.display = 'none';
                 icon.textContent = '▶';
+            } else {
+                header.classList.add('expanded');
+                content.style.display = 'block';
+                icon.textContent = '▼';
             }
         }
         

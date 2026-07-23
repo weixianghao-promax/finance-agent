@@ -1272,29 +1272,110 @@
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-            console.log('[API] 发送请求到:', 'https://ark.cn-beijing.volces.com/api/v3/chat/completions');
+            // 多线路端点配置 - 火山引擎不同地域节点
+            // 广东用户优先使用广州节点，故障时自动切换
+            const apiEndpoints = [
+                { name: '广州', url: 'https://ark.cn-guangzhou.volces.com/api/v3/chat/completions', priority: 1 },
+                { name: '香港', url: 'https://ark.hk-hongkong.volces.com/api/v3/chat/completions', priority: 2 },
+                { name: '深圳', url: 'https://ark.cn-shenzhen.volces.com/api/v3/chat/completions', priority: 3 },
+                { name: '上海', url: 'https://ark.cn-shanghai.volces.com/api/v3/chat/completions', priority: 4 },
+                { name: '北京', url: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', priority: 5 },
+                { name: '新加坡', url: 'https://ark.ap-singapore.volces.com/api/v3/chat/completions', priority: 6 }
+            ];
+
+            // 缓存的最优线路（有效期5分钟）
+            let cachedFastestEndpoint = null;
+            let cacheTimestamp = 0;
+
+            // 后台异步测试各线路延迟，不阻塞当前请求
+            async function updateFastestEndpointCache() {
+                const pingPromises = apiEndpoints.map(async (ep) => {
+                    const startTime = Date.now();
+                    try {
+                        const controller = new AbortController();
+                        const timeout = setTimeout(() => controller.abort(), 2000);
+                        await fetch(ep.url, {
+                            method: 'HEAD',
+                            signal: controller.signal
+                        });
+                        clearTimeout(timeout);
+                        return { ...ep, latency: Date.now() - startTime };
+                    } catch {
+                        return { ...ep, latency: Infinity };
+                    }
+                });
+                
+                const results = await Promise.all(pingPromises);
+                const sorted = results.filter(r => r.latency < Infinity).sort((a, b) => a.latency - b.latency);
+                
+                if (sorted.length > 0) {
+                    cachedFastestEndpoint = sorted[0];
+                    cacheTimestamp = Date.now();
+                    console.log('[API] 后台线路测试完成:', sorted.map(r => `${r.name}: ${r.latency}ms`));
+                    console.log('[API] 最优线路:', cachedFastestEndpoint.name);
+                }
+            }
+
+            // 获取当前最优线路
+            function getCurrentBestEndpoint() {
+                // 使用缓存的最优线路（5分钟内有效）
+                if (cachedFastestEndpoint && Date.now() - cacheTimestamp < 300000) {
+                    return cachedFastestEndpoint;
+                }
+                // 默认使用广州节点（广东用户最优）
+                return apiEndpoints[0];
+            }
+
+            // 后台异步更新线路缓存
+            updateFastestEndpointCache();
+
+            // 当前使用的线路
+            const currentEndpoint = getCurrentBestEndpoint();
+            console.log('[API] 使用线路:', currentEndpoint.name, currentEndpoint.url);
             console.log('[API] API Key前20位:', apiKey.substring(0, 20) + '...');
             console.log('[API] Model:', 'doubao-seed-2-1-turbo-260628');
             
+            // 发送请求（支持故障转移）
+            async function sendRequestWithFailover(apiKey, messages, maxTokens, controller) {
+                // 按优先级排序的线路列表
+                const sortedEndpoints = [...apiEndpoints].sort((a, b) => a.priority - b.priority);
+                
+                for (const ep of sortedEndpoints) {
+                    try {
+                        console.log('[API] 尝试发送请求到:', ep.name);
+                        const response = await fetch(ep.url, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer ' + apiKey
+                            },
+                            body: JSON.stringify({
+                                model: 'doubao-seed-2-1-turbo-260628',
+                                messages: messages,
+                                stream: true,
+                                temperature: 0.5,
+                                top_p: 0.7,
+                                max_tokens: maxTokens,
+                                presence_penalty: 0,
+                                frequency_penalty: 0
+                            }),
+                            signal: controller.signal
+                        });
+
+                        if (response.ok) {
+                            console.log('[API] 响应状态:', response.status, response.statusText, '线路:', ep.name);
+                            console.log('[API] 响应成功，开始读取流式数据');
+                            return response;
+                        }
+                    } catch (e) {
+                        console.warn('[API] 线路', ep.name, '失败:', e.message);
+                    }
+                }
+                throw new Error('所有线路均连接失败');
+            }
+            
             try {
-                const response = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + apiKey
-                    },
-                    body: JSON.stringify({
-                        model: 'doubao-seed-2-1-turbo-260628',
-                        messages: messages,
-                        stream: true,
-                        temperature: 0.5,
-                        top_p: 0.7,
-                        max_tokens: maxTokens,
-                        presence_penalty: 0,
-                        frequency_penalty: 0
-                    }),
-                    signal: controller.signal
-                });
+                const response = await sendRequestWithFailover(apiKey, messages, maxTokens, controller);
 
                 clearTimeout(timeoutId);
 
@@ -1306,7 +1387,6 @@
                     throw new Error('API调用失败: ' + response.status + ' ' + response.statusText);
                 }
 
-                console.log('[API] 响应成功，开始读取流式数据');
                 const result = { body: response.body, mapping: null, cacheKey: cacheKey };
                 return result;
             } catch (fetchError) {

@@ -955,7 +955,18 @@
                     throw new Error('文件大小超过限制（最大10MB）');
                 }
 
-                const content = await readFileContent(file);
+                let content = await readFileContent(file);
+                
+                // 文件预处理：大文件截断和格式优化
+                const MAX_FILE_SIZE = 50000; // 50KB截断阈值
+                if (content.length > MAX_FILE_SIZE) {
+                    content = content.substring(0, MAX_FILE_SIZE) + '\n\n[文件内容过长，已截断]';
+                    console.log('[FILE] 大文件已截断:', content.length);
+                }
+                
+                // 格式优化：去除多余空白字符
+                content = content.replace(/\s+/g, ' ').trim();
+                
                 const fileHash = await generateFileHash(content);
                 
                 const desensitizeResult = await desensitizeContent(content);
@@ -1337,13 +1348,24 @@
                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     };
                     
-                    // 使用requestAnimationFrame实现流畅的实时渲染
+                    // 使用requestAnimationFrame实现流畅的实时渲染（带50ms节流）
+                    let lastRenderTime = 0;
                     const scheduleRender = () => {
                         if (renderFrameId) return;
-                        renderFrameId = requestAnimationFrame(() => {
-                            renderContent();
-                            renderFrameId = null;
-                        });
+                        const now = Date.now();
+                        if (now - lastRenderTime < 50) {
+                            renderFrameId = setTimeout(() => {
+                                renderContent();
+                                renderFrameId = null;
+                                lastRenderTime = Date.now();
+                            }, 50);
+                        } else {
+                            renderFrameId = requestAnimationFrame(() => {
+                                renderContent();
+                                renderFrameId = null;
+                                lastRenderTime = Date.now();
+                            });
+                        }
                     };
                     
                     let buffer = '';
@@ -1828,13 +1850,13 @@
                 return cached.response;
             }
             
-            // 模糊匹配：相似度超过80%的问题返回相同答案
+            // 关键词模糊匹配：相似度超过80%的问题返回相同答案（使用高效的关键词匹配）
             const SIMILARITY_THRESHOLD = 0.8;
             for (const [key, value] of requestCache) {
                 if (Date.now() - value.timestamp < CACHE_TTL) {
-                    const similarity = calculateSimilarity(text, key);
+                    const similarity = keywordsMatch(text, key);
                     if (similarity >= SIMILARITY_THRESHOLD) {
-                        console.log('[CACHE] 模糊匹配命中:', similarity.toFixed(2), '原始:', key);
+                        console.log('[CACHE] 关键词匹配命中:', similarity.toFixed(2), '原始:', key);
                         return value.response;
                     }
                 }
@@ -1975,7 +1997,14 @@
             console.log('[API] 开始调用豆包API，消息长度:', fullUserMessage.length);
             console.log('[API] 请求消息前500字符:', fullUserMessage.substring(0, 500));
 
-            const recentHistory = chatHistory.slice(-1);
+            const cotEnabled = document.getElementById('cot-toggle')?.checked || false;
+            
+            // 根据COT模式动态调整历史上下文
+            let recentHistory = [];
+            if (cotEnabled && chatHistory.length > 0) {
+                recentHistory = chatHistory.slice(-1); // COT模式保留1条历史
+            }
+            // 非COT模式不发送历史，减少请求大小
             const historyToSend = recentHistory.map(function(h) {
                 const content = h.user || h.assistant;
                 return {
@@ -1983,8 +2012,6 @@
                     assistant: h.assistant ? content : null
                 };
             }).filter(h => h.user || h.assistant);
-
-            const cotEnabled = document.getElementById('cot-toggle')?.checked || false;
             console.log('[COT] 思考过程开关状态:', cotEnabled);
             
             let systemPrompt = '';

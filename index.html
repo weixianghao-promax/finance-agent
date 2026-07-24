@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -706,8 +706,8 @@
                     zip.file('word/document.xml', wordXml);
                     
                     // 生成并下载
-                    const content = await zip.generateAsync({ type: 'blob' });
-                    const url = URL.createObjectURL(content);
+                    const zipContent = await zip.generateAsync({ type: 'blob' });
+                    const url = URL.createObjectURL(zipContent);
                     const a = document.createElement('a');
                     a.href = url;
                     a.download = `会话_${data.sessionName || '导出'}_${Date.now()}.docx`;

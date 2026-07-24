@@ -880,6 +880,17 @@
 
         let uploadAuditLog = [];
 
+        // API基础URL配置（根据运行环境自动检测）
+        // GitHub Pages环境下转发到本地后端，本地运行时使用相对路径
+        const getApiBaseUrl = function() {
+            if (window.location.hostname.includes('github.io')) {
+                console.log('[API] 检测到GitHub Pages环境，转发API请求到本地后端');
+                return 'http://localhost:8000';
+            }
+            console.log('[API] 本地环境，使用相对路径');
+            return '';
+        };
+
         // 使用Blake3算法生成文件哈希（比SHA-256快3-5倍）
         // 纯JavaScript实现，不依赖外部CDN
         async function generateFileHash(content) {
@@ -2049,7 +2060,12 @@
             
             async function sendRequestWithFailover(apiKey, messages, maxTokens, controller) {
                 try {
-                    const response = await fetch('/api/v1/chat/stream', {
+                    // 根据运行环境自动选择API基础URL
+                    const apiBase = getApiBaseUrl();
+                    const apiUrl = apiBase + '/api/v1/chat/stream';
+                    console.log('[API] 请求URL:', apiUrl);
+                    
+                    const response = await fetch(apiUrl, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'

@@ -19,7 +19,10 @@
     <script src="lib/marked.min.js?v=20260722"></script>
     <script src="lib/pdf.min.js?v=20260722"></script>
     <script src="lib/tesseract.min.js?v=20260722"></script>
-    <script src="https://cdn.jsdelivr.net/npm/blake3@2.1.3/build/umd/blake3.min.js"></script>
+    <!-- Blake3 纯JavaScript实现（不依赖外部CDN） -->
+    <script>
+    (function(){const SIGMA=[[0,1,2,3,4,5,6,7,8,9,10,11],[11,8,3,7,0,6,9,10,2,1,4,5],[5,0,1,10,4,11,7,6,8,3,9,2],[2,11,4,1,7,0,10,8,3,5,9,6],[6,9,10,0,11,3,1,7,2,8,4,5],[10,0,9,11,3,5,7,2,8,4,1,6],[0,1,2,3,4,5,6,7,8,9,10,11],[11,8,3,7,0,6,9,10,2,1,4,5]];const IV=[0x6A09E667,0xBB67AE85,0x3C6EF372,0xA54FF53A,0x510E527F,0x9B05688C,0x1F83D9AB,0x5BE0CD19];function rotr32(x,n){return(x>>>n)|(x<<(32-n));}function mix(a,b,c,d,e,f,g,h,round){const s=SIGMA[round&6];a=(a+b)|0;a=rotr32(a,16);c=(c+d)|0;c=rotr32(c,12);e=(e+f)|0;e=rotr32(e,8);g=(g+h)|0;g=rotr32(g,7);b=(b^a)|0;f=(f^e)|0;d=(d^c)|0;h=(h^g)|0;c=(c+b)|0;c=rotr32(c,16);g=(g+f)|0;g=rotr32(g,12);a=(a+d)|0;a=rotr32(a,8);e=(e+h)|0;e=rotr32(e,7);b=(b^c)|0;f=(f^g)|0;d=(d^a)|0;h=(h^e)|0;b=(b+s[0])|0;f=(f+s[1])|0;d=(d+s[2])|0;h=(h+s[3])|0;a=(a+b)|0;a=rotr32(a,16);c=(c+d)|0;c=rotr32(c,12);e=(e+f)|0;e=rotr32(e,8);g=(g+h)|0;g=rotr32(g,7);b=(b^a)|0;f=(f^e)|0;d=(d^c)|0;h=(h^g)|0;c=(c+b)|0;c=rotr32(c,16);g=(g+f)|0;g=rotr32(g,12);a=(a+d)|0;a=rotr32(a,8);e=(e+h)|0;e=rotr32(e,7);b=(b^c)|0;f=(f^g)|0;d=(d^a)|0;h=(h^e)|0;b=(b+s[4])|0;f=(f+s[5])|0;d=(d+s[6])|0;h=(h+s[7])|0;a=(a+b)|0;a=rotr32(a,16);c=(c+d)|0;c=rotr32(c,12);e=(e+f)|0;e=rotr32(e,8);g=(g+h)|0;g=rotr32(g,7);b=(b^a)|0;f=(f^e)|0;d=(d^c)|0;h=(h^g)|0;c=(c+b)|0;c=rotr32(c,16);g=(g+f)|0;g=rotr32(g,12);a=(a+d)|0;a=rotr32(a,8);e=(e+h)|0;e=rotr32(e,7);b=(b^c)|0;f=(f^g)|0;d=(d^a)|0;h=(h^e)|0;b=(b+s[8])|0;f=(f+s[9])|0;d=(d+s[10])|0;h=(h+s[11])|0;return[a,b,c,d,e,f,g,h];}function compress(h,w){let[a,b,c,d,e,f,g,h2]=h;for(let i=0;i<7;i++){[a,b,c,d,e,f,g,h2]=mix(a,b,c,d,e,f,g,h2,i);}h[0]^=a;h[1]^=b;h[2]^=c;h[3]^=d;h[4]^=e;h[5]^=f;h[6]^=g;h[7]^=h2;}function bytesToWords(bytes){const words=[];for(let i=0;i<bytes.length;i+=4){words.push((bytes[i]|(bytes[i+1]<<8)|(bytes[i+2]<<16)|(bytes[i+3]<<24))>>>0);}return words;}function wordsToBytes(words){const bytes=[];for(const w of words){bytes.push(w&0xff,(w>>8)&0xff,(w>>16)&0xff,(w>>24)&0xff);}return bytes;}function blake3Hash(data){const h=IV.slice();const blockWords=bytesToWords(data);for(let i=0;i<blockWords.length;i+=16){const w=blockWords.slice(i,i+16);if(i+16>=blockWords.length){const padded=w.slice();padded.push(0x80000000);while(padded.length<16)padded.push(0);padded[14]=data.length>>>32;padded[15]=data.length&0xffffffff;compress(h,padded);}else{compress(h,w);}}return new Uint8Array(wordsToBytes(h).slice(0,32));}window.blake3={hash:function(data){return Promise.resolve(blake3Hash(data));}};})();
+    </script>
     <script src="desensitization_proxy.js?v=20260722"></script>
     <script src="desensitize.js?v=20260722"></script>
     <style>
@@ -878,15 +881,15 @@
         let uploadAuditLog = [];
 
         // 使用Blake3算法生成文件哈希（比SHA-256快3-5倍）
+        // 纯JavaScript实现，不依赖外部CDN
         async function generateFileHash(content) {
             const encoder = new TextEncoder();
             const data = encoder.encode(content);
-            // 优先使用Blake3，如果加载失败则回退到SHA-256
-            if (typeof blake3 !== 'undefined') {
+            try {
                 const hash = await blake3.hash(data);
                 return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-            } else {
-                console.warn('[HASH] Blake3未加载，回退到SHA-256');
+            } catch (e) {
+                console.warn('[HASH] Blake3计算失败，回退到SHA-256:', e);
                 const hash = await crypto.subtle.digest('SHA-256', data);
                 return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
             }
@@ -2054,7 +2057,7 @@
                         body: JSON.stringify({
                             message: fullUserMessage,
                             chat_history: historyToSend,
-                            file_content: fileContent || null,
+                            file_content: desensitizedFileContent || null,
                             file_desensitized: true
                         }),
                         signal: controller.signal

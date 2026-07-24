@@ -1312,16 +1312,8 @@
                 } else {
                     const body = result.body;
                     
-                    // 使用 highWaterMark 提高读取效率
-                    // BYOB模式在部分浏览器不支持，需要降级处理
-                    let reader;
-                    try {
-                        reader = body.getReader({ mode: 'byob', highWaterMark: 8192 });
-                        console.log('[STREAM] 使用BYOB模式读取');
-                    } catch (e) {
-                        console.warn('[STREAM] BYOB模式不支持，降级到标准模式:', e);
-                        reader = body.getReader();
-                    }
+                    // 使用默认reader读取流
+                    const reader = body.getReader();
                     const decoder = new TextDecoder('utf-8');
                     
                     const renderContent = () => {

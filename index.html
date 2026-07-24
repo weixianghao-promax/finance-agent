@@ -2041,94 +2041,46 @@
                 }
             }
 
-            // 当前使用的线路
-            const currentEndpoint = getCurrentBestEndpoint();
-            console.log('[API] 使用线路:', currentEndpoint.name, currentEndpoint.url);
-            console.log('[API] API Key前20位:', apiKey.substring(0, 20) + '...');
-            console.log('[API] Model:', 'doubao-1-5-pro-32k');
+            // 通过后端代理调用API（解决CORS问题，隐藏API Key）
+            console.log('[API] 通过后端代理调用 /api/v1/chat/stream');
             
-            // 发送请求（支持故障转移）
             async function sendRequestWithFailover(apiKey, messages, maxTokens, controller) {
-                // 按优先级排序的线路列表
-                const sortedEndpoints = [...apiEndpoints].sort((a, b) => a.priority - b.priority);
-                
-                let lastError = null;
-                
-                for (const ep of sortedEndpoints) {
-                    try {
-                        console.log('[API] 尝试发送请求到:', ep.name);
-                        const response = await fetch(ep.url, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': 'Bearer ' + apiKey,
-                                'Connection': 'keep-alive',
-                                'Keep-Alive': 'timeout=60, max=100'
-                            },
-                            body: JSON.stringify({
-                                model: 'doubao-1-5-pro-32k',
-                                messages: messages,
-                                stream: true,
-                                temperature: 0.3,
-                                top_p: 0.5,
-                                max_tokens: maxTokens,
-                                presence_penalty: 0,
-                                frequency_penalty: 0
-                            }),
-                            signal: controller.signal
-                        });
+                try {
+                    const response = await fetch('/api/v1/chat/stream', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            message: fullUserMessage,
+                            chat_history: historyToSend,
+                            file_content: fileContent || null,
+                            file_desensitized: true
+                        }),
+                        signal: controller.signal
+                    });
 
-                        if (response.ok) {
-                            console.log('[API] 响应状态:', response.status, response.statusText, '线路:', ep.name);
-                            console.log('[API] 响应成功，开始读取流式数据');
-                            return response;
-                        }
-                        
-                        // 处理非2xx响应（如401、429、500等）
-                        let errorInfo = {};
-                        try {
-                            errorInfo = await response.json();
-                        } catch {
-                            errorInfo = { message: await response.text() };
-                        }
-                        
-                        const errorRecord = {
-                            timestamp: new Date().toISOString(),
-                            status: response.status,
-                            statusText: response.statusText,
-                            endpoint: ep.name,
-                            error: errorInfo
-                        };
-                        
-                        console.error('[API] 线路', ep.name, '返回错误:', JSON.stringify(errorRecord, null, 2));
-                        
-                        // 自动化分析错误原因
-                        const errorAnalysis = analyzeApiError(response.status, errorInfo);
-                        console.error('[API] 错误分析:', errorAnalysis);
-                        
-                        lastError = new Error(`线路 ${ep.name} 返回错误: ${response.status} ${response.statusText}`);
-                        
-                        // 认证错误不重试其他线路
-                        if (response.status === 401 || response.status === 403) {
-                            throw new Error('API密钥无效或权限不足');
-                        }
-                        
-                        // 限流错误不重试其他线路（所有线路共享限流）
-                        if (response.status === 429) {
-                            throw new Error('请求过于频繁，请稍后再试');
-                        }
-                        
-                    } catch (e) {
-                        console.warn('[API] 线路', ep.name, '失败:', e.message);
-                        lastError = e;
-                        // 超时或网络错误继续尝试下一条线路
+                    if (response.ok) {
+                        console.log('[API] 响应状态:', response.status, response.statusText);
+                        console.log('[API] 响应成功，开始读取流式数据');
+                        return response;
                     }
                     
-                    // 故障转移时添加短暂延迟
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    // 处理非2xx响应
+                    let errorInfo = {};
+                    try {
+                        errorInfo = await response.json();
+                    } catch {
+                        errorInfo = { message: await response.text() };
+                    }
+                    
+                    console.error('[API] 后端返回错误:', JSON.stringify(errorInfo, null, 2));
+                    throw new Error(`后端返回错误: ${response.status} ${response.statusText}`);
+                    
+                } catch (e) {
+                    console.warn('[API] 后端请求失败:', e.message);
+                    throw new Error('后端服务连接失败，请检查后端服务是否启动');
                 }
-                
-                throw lastError || new Error('所有线路均连接失败');
             }
             
             // 自动化分析API错误原因

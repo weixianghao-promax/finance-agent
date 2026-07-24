@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -1997,7 +1997,22 @@
             let cachedFastestEndpoint = null;
             let cacheTimestamp = 0;
 
-            // 后台异步测试各线路延迟，不阻塞当前请求
+            // 获取当前最优线路（首次请求时才进行探测）
+            function getCurrentBestEndpoint() {
+                // 使用缓存的最优线路（5分钟内有效）
+                if (cachedFastestEndpoint && Date.now() - cacheTimestamp < 300000) {
+                    return cachedFastestEndpoint;
+                }
+                // 默认使用广州节点（广东用户最优），首次请求后再异步探测
+                if (cacheTimestamp === 0) {
+                    // 首次请求，后台异步探测，但当前请求直接使用默认线路
+                    cacheTimestamp = Date.now(); // 标记已请求过，避免重复探测
+                    setTimeout(updateFastestEndpointCache, 100);
+                }
+                return apiEndpoints[0];
+            }
+
+            // 后台异步测试各线路延迟（仅首次请求或缓存过期时执行）
             async function updateFastestEndpointCache() {
                 const pingPromises = apiEndpoints.map(async (ep) => {
                     const startTime = Date.now();
@@ -2026,24 +2041,11 @@
                 }
             }
 
-            // 获取当前最优线路
-            function getCurrentBestEndpoint() {
-                // 使用缓存的最优线路（5分钟内有效）
-                if (cachedFastestEndpoint && Date.now() - cacheTimestamp < 300000) {
-                    return cachedFastestEndpoint;
-                }
-                // 默认使用广州节点（广东用户最优）
-                return apiEndpoints[0];
-            }
-
-            // 后台异步更新线路缓存
-            updateFastestEndpointCache();
-
             // 当前使用的线路
             const currentEndpoint = getCurrentBestEndpoint();
             console.log('[API] 使用线路:', currentEndpoint.name, currentEndpoint.url);
             console.log('[API] API Key前20位:', apiKey.substring(0, 20) + '...');
-            console.log('[API] Model:', 'doubao-seed-2-1-turbo-260628');
+            console.log('[API] Model:', 'doubao-1-5-pro-32k');
             
             // 发送请求（支持故障转移）
             async function sendRequestWithFailover(apiKey, messages, maxTokens, controller) {
@@ -2064,15 +2066,14 @@
                                 'Keep-Alive': 'timeout=60, max=100'
                             },
                             body: JSON.stringify({
-                                model: 'doubao-seed-2-1-turbo-260628',
+                                model: 'doubao-1-5-pro-32k',
                                 messages: messages,
                                 stream: true,
-                                temperature: 0.3, // 降低随机性，提高生成速度
-                                top_p: 0.5, // 缩小采样范围，提高生成速度
+                                temperature: 0.3,
+                                top_p: 0.5,
                                 max_tokens: maxTokens,
                                 presence_penalty: 0,
-                                frequency_penalty: 0,
-                                stop: ['\n\n'] // 添加停止词，减少不必要的输出
+                                frequency_penalty: 0
                             }),
                             signal: controller.signal
                         });

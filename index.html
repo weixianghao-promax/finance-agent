@@ -169,6 +169,9 @@
     </style>
 </head>
 <body>
+    <div id="github-pages-banner" style="display:none; background: linear-gradient(135deg, #ff6b6b, #ee5a24); color: white; padding: 12px 20px; text-align: center; font-size: 14px; position: sticky; top: 0; z-index: 9999;">
+        ⚠️ <strong>提示：</strong>当前为GitHub Pages静态预览版本，API功能不可用。请通过本地地址 <a href="http://localhost:8000" style="color: #fff; text-decoration: underline; font-weight: bold;">http://localhost:8000</a> 访问以使用完整功能。
+    </div>
     <div class="sidebar">
         <h3>⚡ 快捷功能</h3>
         <button class="quick-btn financial" onclick="generateAnnualFinancialReport()">📊 年度财务整合</button>
@@ -877,22 +880,11 @@
         let uploadAuditLog = [];
 
         // API基础URL配置（根据运行环境自动检测）
-        // 注意：GitHub Pages是HTTPS，本地后端是HTTP，浏览器会阻止混合内容
-        // 推荐通过本地地址 http://localhost:8000 访问
+        // GitHub Pages环境：不连接localhost，仅本地环境使用相对路径
         const getApiBaseUrl = function() {
             if (window.location.hostname.includes('github.io')) {
-                // GitHub Pages环境：检测是否有本地HTTPS后端
-                const localHttpsUrl = 'https://localhost:8000';
-                const localHttpUrl = 'http://localhost:8000';
-                
-                // 如果是HTTPS页面，尝试HTTPS后端；否则使用HTTP后端
-                if (window.location.protocol === 'https:') {
-                    console.log('[API] GitHub Pages(HTTPS)环境，尝试连接本地HTTPS后端');
-                    return localHttpsUrl;
-                } else {
-                    console.log('[API] GitHub Pages环境，转发API请求到本地后端');
-                    return localHttpUrl;
-                }
+                console.log('[API] GitHub Pages环境，不连接本地后端');
+                return '';
             }
             console.log('[API] 本地环境，使用相对路径');
             return '';
@@ -3221,6 +3213,15 @@ ${historySummary}
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            // GitHub Pages环境检测与提示
+            if (window.location.hostname.includes('github.io')) {
+                const banner = document.getElementById('github-pages-banner');
+                if (banner) {
+                    banner.style.display = 'block';
+                }
+                console.log('[ENV] GitHub Pages环境，显示静态预览提示');
+            }
+            
             loadSecurityConfig();
             loadApiKey();
             if (chatHistory.length > 0) {

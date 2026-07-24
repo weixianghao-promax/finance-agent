@@ -19,6 +19,7 @@
     <script src="lib/marked.min.js?v=20260722"></script>
     <script src="lib/pdf.min.js?v=20260722"></script>
     <script src="lib/tesseract.min.js?v=20260722"></script>
+    <script src="https://cdn.jsdelivr.net/npm/blake3@2.1.3/build/umd/blake3.min.js"></script>
     <script src="desensitization_proxy.js?v=20260722"></script>
     <script src="desensitize.js?v=20260722"></script>
     <style>
@@ -151,6 +152,21 @@
         .file-type-tag.markdown { background: rgba(255, 152, 0, 0.2); color: #ffb74d; border: 1px solid rgba(255, 152, 0, 0.3); }
         .file-type-tag.txt { background: rgba(156, 163, 175, 0.2); color: #cbd5e0; border: 1px solid rgba(156, 163, 175, 0.3); }
         .file-type-tag.auto { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); }
+        
+        /* 会话管理样式 */
+        .session-item { padding: 12px; border-radius: 8px; cursor: pointer; transition: all 0.3s; background: rgba(255,255,255,0.05); margin-bottom: 8px; }
+        .session-item:hover { background: rgba(255,255,255,0.1); transform: translateX(5px); }
+        .session-item.active { background: rgba(66,165,245,0.2); border-left: 3px solid #42a5f5; }
+        .session-name { font-size: 13px; color: white; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .session-time { font-size: 11px; color: rgba(255,255,255,0.5); }
+        .session-count { font-size: 11px; color: rgba(66,165,245,0.8); margin-top: 4px; }
+        .session-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .session-header h3 { margin: 0; }
+        .new-session-btn { padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; border: none; background: linear-gradient(135deg, #42a5f5, #1e88e5); color: white; transition: all 0.3s; }
+        .new-session-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(66,165,245,0.3); }
+        .export-btns { display: flex; gap: 8px; margin-top: 10px; }
+        .export-btn { padding: 8px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.1); color: white; transition: all 0.3s; }
+        .export-btn:hover { background: rgba(255,255,255,0.2); }
     </style>
 </head>
 <body>
@@ -160,6 +176,8 @@
         <button class="quick-btn safety" onclick="generateSafetyImprovementPlan()">🛡️ 安全生产方案</button>
         <button class="quick-btn history" onclick="openHistoryModal()">📋 聊天记录</button>
         <button class="quick-btn security" onclick="openSecurityModal()">🔐 安全设置</button>
+        <button class="quick-btn" style="background: linear-gradient(135deg, #ab47bc, #7b1fa2);" onclick="createNewSession()">🆕 新会话</button>
+        <button class="quick-btn" style="background: linear-gradient(135deg, #5c6bc0, #3949ab);" onclick="openSessionModal()">📱 会话管理</button>
     </div>
     
     <div class="main-content">
@@ -229,6 +247,25 @@
                 <input type="text" id="history-search" placeholder="搜索关键字..." oninput="searchHistory()">
             </div>
             <div class="modal-content" id="history-content">
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal-overlay" id="session-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="session-header">
+                    <h2>📱 会话管理</h2>
+                    <button class="new-session-btn" onclick="createNewSession(); closeSessionModal()">🆕 新会话</button>
+                </div>
+                <button class="modal-close" onclick="closeSessionModal()">×</button>
+            </div>
+            <div class="modal-content" id="session-list" style="max-height: 400px; overflow-y: auto;">
+            </div>
+            <div class="export-btns">
+                <button class="export-btn" onclick="exportSession(); closeSessionModal()">📤 导出当前会话</button>
+                <button class="export-btn" onclick="exportAllSessions(); closeSessionModal()">📥 导出所有会话</button>
+                <button class="export-btn" onclick="jsonToWord()">📝 JSON转Word</button>
             </div>
         </div>
     </div>
@@ -313,6 +350,10 @@
         let currentFilter = 'all';
         let currentSearch = '';
         
+        // 会话管理
+        let currentSessionId = generateSessionId();
+        let sessions = loadSessions();
+        
         function selectFormat(format) {
             selectedFormat = format;
             document.querySelectorAll('.format-btn').forEach(btn => btn.classList.remove('active'));
@@ -391,11 +432,347 @@
         
         function saveChatHistory() {
             try {
-                const toSave = chatHistory.slice(-50);
+                const toSave = chatHistory.slice(-100);
                 localStorage.setItem('port_chat_history', JSON.stringify(toSave));
             } catch (e) {
                 console.error('保存聊天记录失败:', e);
             }
+        }
+        
+        // 生成唯一会话ID
+        function generateSessionId() {
+            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+        
+        // 加载所有会话
+        function loadSessions() {
+            try {
+                const stored = localStorage.getItem('port_sessions');
+                if (stored) {
+                    return JSON.parse(stored);
+                }
+            } catch (e) {
+                console.error('加载会话失败:', e);
+            }
+            return [];
+        }
+        
+        // 保存会话
+        function saveSessions() {
+            try {
+                localStorage.setItem('port_sessions', JSON.stringify(sessions));
+            } catch (e) {
+                console.error('保存会话失败:', e);
+            }
+        }
+        
+        // 创建新会话
+        function createNewSession() {
+            // 保存当前会话
+            if (chatHistory.length > 0) {
+                const sessionIndex = sessions.findIndex(s => s.id === currentSessionId);
+                if (sessionIndex >= 0) {
+                    sessions[sessionIndex] = {
+                        id: currentSessionId,
+                        name: summarizeSession(chatHistory),
+                        timestamp: Date.now(),
+                        messages: chatHistory
+                    };
+                } else {
+                    sessions.push({
+                        id: currentSessionId,
+                        name: summarizeSession(chatHistory),
+                        timestamp: Date.now(),
+                        messages: chatHistory
+                    });
+                }
+                // 只保留最近20个会话
+                sessions = sessions.slice(-20);
+                saveSessions();
+            }
+            
+            // 创建新会话
+            currentSessionId = generateSessionId();
+            chatHistory = [];
+            messagesContainer.innerHTML = '';
+            saveChatHistory();
+            
+            addMessage('🎉 新会话已创建，开始新的对话吧！', 'assistant');
+            renderSessionList();
+        }
+        
+        // 总结会话内容（用于自动命名）
+        function summarizeSession(messages) {
+            if (!messages || messages.length === 0) {
+                return '未命名会话';
+            }
+            // 获取前几条消息的用户输入
+            const userMessages = messages.filter(m => m.user).map(m => m.user).slice(0, 3);
+            if (userMessages.length === 0) {
+                return '未命名会话';
+            }
+            // 提取关键词进行总结
+            let summary = userMessages.join(' ');
+            // 移除标点符号
+            summary = summary.replace(/[，。！？、\n\r]/g, ' ');
+            // 取前30个字符
+            return summary.substring(0, 30) + (summary.length > 30 ? '...' : '');
+        }
+        
+        // 切换会话
+        function switchSession(sessionId) {
+            const session = sessions.find(s => s.id === sessionId);
+            if (session) {
+                // 保存当前会话
+                if (chatHistory.length > 0) {
+                    const sessionIndex = sessions.findIndex(s => s.id === currentSessionId);
+                    if (sessionIndex >= 0) {
+                        sessions[sessionIndex].messages = chatHistory;
+                        sessions[sessionIndex].timestamp = Date.now();
+                        sessions[sessionIndex].name = summarizeSession(chatHistory);
+                    }
+                    saveSessions();
+                }
+                
+                // 切换到目标会话
+                currentSessionId = sessionId;
+                chatHistory = session.messages;
+                renderChatHistory();
+                renderSessionList();
+            }
+        }
+        
+        // 渲染会话列表
+        function renderSessionList() {
+            const sessionList = document.getElementById('session-list');
+            if (!sessionList) return;
+            
+            sessionList.innerHTML = '';
+            
+            // 按时间倒序排列
+            const sortedSessions = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
+            
+            sortedSessions.forEach(session => {
+                const item = document.createElement('div');
+                item.className = 'session-item' + (session.id === currentSessionId ? ' active' : '');
+                item.innerHTML = `
+                    <div class="session-name">${escapeHtml(session.name)}</div>
+                    <div class="session-time">${formatTime(session.timestamp)}</div>
+                    <div class="session-count">${session.messages.length}条消息</div>
+                `;
+                item.onclick = () => switchSession(session.id);
+                sessionList.appendChild(item);
+            });
+        }
+        
+        // 渲染聊天历史
+        function renderChatHistory() {
+            messagesContainer.innerHTML = '';
+            chatHistory.forEach(item => {
+                if (item.user) {
+                    addMessage(item.user, 'user');
+                }
+                if (item.assistant) {
+                    addMessage(item.assistant, 'assistant');
+                }
+            });
+        }
+        
+        // 格式化时间
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = now - date;
+            
+            if (diff < 60000) return '刚刚';
+            if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+            if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+            if (diff < 604800000) return Math.floor(diff / 86400000) + '天前';
+            
+            return `${date.getMonth() + 1}/${date.getDate()}`;
+        }
+        
+        // HTML转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 导出当前会话为JSON
+        function exportSession() {
+            const data = {
+                sessionId: currentSessionId,
+                sessionName: summarizeSession(chatHistory),
+                exportTime: new Date().toISOString(),
+                messages: chatHistory,
+                version: '1.0'
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `会话_${summarizeSession(chatHistory)}_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            showToast('✅ 会话已导出');
+        }
+        
+        // 导出所有会话为JSON
+        function exportAllSessions() {
+            const data = {
+                exportTime: new Date().toISOString(),
+                sessions: sessions,
+                currentSessionId: currentSessionId,
+                version: '1.0'
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `所有会话_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            showToast('✅ 所有会话已导出');
+        }
+        
+        // JSON转Word功能
+        function jsonToWord() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                try {
+                    const content = await readAsText(file);
+                    const data = JSON.parse(content);
+                    
+                    // 生成Word文档内容（使用HTML格式）
+                    let htmlContent = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>会话导出</title>';
+                    htmlContent += '<style>body{font-family:Microsoft YaHei,sans-serif;margin:40px;}';
+                    htmlContent += '.session-title{font-size:20px;font-weight:bold;margin-bottom:20px;color:#1a237e;}';
+                    htmlContent += '.message{margin-bottom:15px;}';
+                    htmlContent += '.user-label{font-weight:bold;color:#1e88e5;margin-right:10px;}';
+                    htmlContent += '.assistant-label{font-weight:bold;color:#43a047;margin-right:10px;}';
+                    htmlContent += '.message-content{line-height:1.8;}';
+                    htmlContent += '</style></head><body>';
+                    
+                    if (data.sessions) {
+                        // 多个会话
+                        data.sessions.forEach((session, index) => {
+                            htmlContent += `<div class="session-title">会话 ${index + 1}: ${session.name}</div>`;
+                            htmlContent += `<p style="color:#666;font-size:14px;">更新时间: ${new Date(session.timestamp).toLocaleString()}</p>`;
+                            session.messages.forEach(msg => {
+                                if (msg.user) {
+                                    htmlContent += `<div class="message"><span class="user-label">用户:</span><span class="message-content">${msg.user}</span></div>`;
+                                }
+                                if (msg.assistant) {
+                                    htmlContent += `<div class="message"><span class="assistant-label">助手:</span><span class="message-content">${msg.assistant}</span></div>`;
+                                }
+                            });
+                            htmlContent += '<hr style="margin:30px 0;border:none;border-top:1px solid #ddd;">';
+                        });
+                    } else if (data.messages) {
+                        // 单个会话
+                        htmlContent += `<div class="session-title">会话: ${data.sessionName || '未命名会话'}</div>`;
+                        data.messages.forEach(msg => {
+                            if (msg.user) {
+                                htmlContent += `<div class="message"><span class="user-label">用户:</span><span class="message-content">${msg.user}</span></div>`;
+                            }
+                            if (msg.assistant) {
+                                htmlContent += `<div class="message"><span class="assistant-label">助手:</span><span class="message-content">${msg.assistant}</span></div>`;
+                            }
+                        });
+                    }
+                    
+                    htmlContent += '</body></html>';
+                    
+                    // 创建Word文档（使用JSZip生成docx格式）
+                    const zip = new JSZip();
+                    
+                    // Word文档结构
+                    zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+                    
+                    zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+                    
+                    // 转换HTML到Word XML格式
+                    const wordXml = htmlToWordXml(htmlContent);
+                    zip.file('word/document.xml', wordXml);
+                    
+                    // 生成并下载
+                    const content = await zip.generateAsync({ type: 'blob' });
+                    const url = URL.createObjectURL(content);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `会话_${data.sessionName || '导出'}_${Date.now()}.docx`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    
+                    showToast('✅ Word文档已生成');
+                } catch (error) {
+                    console.error('JSON转Word失败:', error);
+                    showToast('❌ JSON转Word失败：' + error.message);
+                }
+            };
+            input.click();
+        }
+        
+        // HTML转Word XML
+        function htmlToWordXml(htmlContent) {
+            // 简化处理：将HTML转换为Word兼容的XML格式
+            let xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>
+<w:p>
+<w:r>
+<w:t>${escapeXml('会话导出文档')}</w:t>
+</w:r>
+</w:p>
+<w:p><w:r><w:t xml:space="preserve"> </w:t></w:r></w:p>`;
+            
+            // 简单解析HTML内容
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlContent, 'text/html');
+            const messages = doc.querySelectorAll('.message');
+            
+            messages.forEach(msg => {
+                const label = msg.querySelector('.user-label') ? '用户' : '助手';
+                const content = msg.querySelector('.message-content')?.textContent || '';
+                
+                xml += `<w:p>
+<w:r>
+<w:rPr>
+<w:b/>
+<w:color w:val="${label === '用户' ? '1E88E5' : '43A047'}"/>
+</w:rPr>
+<w:t>${escapeXml(label)}: </w:t>
+</w:r>
+<w:r>
+<w:t>${escapeXml(content)}</w:t>
+</w:r>
+</w:p>`;
+            });
+            
+            xml += `</w:body>
+</w:document>`;
+            
+            return xml;
+        }
+        
+        // XML转义
+        function escapeXml(text) {
+            if (!text) return '';
+            return text.replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;')
+                       .replace(/"/g, '&quot;')
+                       .replace(/'/g, '&apos;');
         }
         
         function getFinancialHistory() {
@@ -500,11 +877,19 @@
 
         let uploadAuditLog = [];
 
+        // 使用Blake3算法生成文件哈希（比SHA-256快3-5倍）
         async function generateFileHash(content) {
             const encoder = new TextEncoder();
             const data = encoder.encode(content);
-            const hash = await crypto.subtle.digest('SHA-256', data);
-            return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+            // 优先使用Blake3，如果加载失败则回退到SHA-256
+            if (typeof blake3 !== 'undefined') {
+                const hash = await blake3.hash(data);
+                return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+            } else {
+                console.warn('[HASH] Blake3未加载，回退到SHA-256');
+                const hash = await crypto.subtle.digest('SHA-256', data);
+                return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+            }
         }
 
         function logUpload(fileName, fileSize, hash, success) {
@@ -562,7 +947,13 @@
                     setTimeout(() => downloadKeyFile(), 500);
                 }, 300);
                 
-                addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: SHA-256\n\n预览：\n```\n' + previewContent + '\n```\n\n📥 已自动下载脱敏文件和密钥文件\n\n您可以提问了。', 'assistant');
+                // 分析文件并生成智能建议
+            const analysisResult = analyzeUploadedFile(file, desensitizedFullContent);
+            
+            addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: Blake3\n\n预览：\n```\n' + previewContent + '\n```\n\n📥 已自动下载脱敏文件和密钥文件\n\n' + analysisResult.summary + '\n\n' + analysisResult.suggestions, 'assistant');
+            
+            // 显示智能建议按钮
+            showSmartSuggestions(analysisResult.suggestionButtons);
             } catch (error) {
                 logUpload(file.name || 'unknown', 0, '', false);
                 addMessage('❌ 文件上传失败：' + error.message + '\n请尝试将文件内容复制为文本后重新上传。', 'assistant');
@@ -860,12 +1251,12 @@
             let thinkingContent = '';
             let answerContent = '';
             let inThinking = true;
-            let renderInterval = null;
-            let pendingRender = false;
+            let renderFrameId = null;
             
             try {
                 const result = await callDeepSeekAPI(desensitizedText, isQuickAction, isDesensitizeEnabled, desensitizedText, desensitizedFileContent);
                 const cacheKey = result.cacheKey || null;
+                const timeoutId = result.timeoutId || null;
                 
                 if (result.responseType === 'cached') {
                     console.log('使用缓存响应');
@@ -873,6 +1264,9 @@
                     thinkingContent = result.thinkingContent || '';
                     answerContent = result.answerContent || '';
                     inThinking = !answerContent;
+                    
+                    // 缓存响应时清除超时
+                    if (timeoutId) clearTimeout(timeoutId);
                     
                     const thinkingDiv = thinkingContainer.querySelector('.thinking-content');
                     const thinkingHeader = thinkingContainer.querySelector('.thinking-header');
@@ -891,49 +1285,57 @@
                 } else {
                     const body = result.body;
                     
-                    const reader = body.getReader();
-                    const decoder = new TextDecoder();
+                    // 使用 highWaterMark 提高读取效率
+                    const reader = body.getReader({ mode: 'byob', highWaterMark: 8192 });
+                    const decoder = new TextDecoder('utf-8');
                     
                     const renderContent = () => {
-                        if (!pendingRender) return;
-                        pendingRender = false;
-                        
                         const thinkingDiv = thinkingContainer.querySelector('.thinking-content');
                         const thinkingHeader = thinkingContainer.querySelector('.thinking-header');
                         
-                        if (thinkingContent && inThinking) {
+                        // 实时更新思考内容
+                        if (thinkingContent) {
                             thinkingContainer.style.display = 'block';
-                            thinkingDiv.innerHTML = displayDesensitize(marked.parse(thinkingContent));
+                            thinkingDiv.innerHTML = displayDesensitize(marked.parse(thinkingContent.replace('[思考]', '').trim()));
                             thinkingHeader.classList.add('expanded');
                             thinkingHeader.querySelector('.toggle-icon').textContent = '▼';
-                        } else if (thinkingContent && !inThinking) {
-                            thinkingContainer.style.display = 'block';
+                            console.log('[COT] 实时思考:', thinkingContent.substring(thinkingContent.length - 30));
                         }
                         
+                        // 优化：流式渲染时不进行Markdown解析（减少CPU开销），只做简单换行处理
                         if (!inThinking) {
-                            streamContent.innerHTML = displayDesensitize(marked.parse(answerContent));
-                        } else if (!thinkingContent) {
-                            streamContent.innerHTML = displayDesensitize(marked.parse(fullResponse));
+                            streamContent.innerHTML = displayDesensitize(answerContent.replace(/\n/g, '<br>'));
                         }
                         
                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     };
                     
-                    renderInterval = setInterval(renderContent, 100);
+                    // 使用requestAnimationFrame实现流畅的实时渲染
+                    const scheduleRender = () => {
+                        if (renderFrameId) return;
+                        renderFrameId = requestAnimationFrame(() => {
+                            renderContent();
+                            renderFrameId = null;
+                        });
+                    };
                     
                     let buffer = '';
+                    const lineSeparator = '\n';
                     
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done) break;
                         
+                        // 解码数据块
                         const chunk = decoder.decode(value, { stream: true });
                         buffer += chunk;
                         
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop() || '';
-                        
-                        for (const line of lines) {
+                        // 查找完整的行
+                        let lineEndIndex;
+                        while ((lineEndIndex = buffer.indexOf(lineSeparator)) !== -1) {
+                            const line = buffer.substring(0, lineEndIndex);
+                            buffer = buffer.substring(lineEndIndex + lineSeparator.length);
+                            
                             if (line.startsWith('data: ')) {
                                 const data = line.substring(6).trim();
                                 if (data === '[DONE]') continue;
@@ -962,7 +1364,10 @@
                                             answerContent += content;
                                         }
                                         
-                                        pendingRender = true;
+                                        // 优化：只在积累足够内容后才渲染（每50字符或换行）
+                                        if (answerContent.length % 50 === 0 || content.includes('\n')) {
+                                            scheduleRender();
+                                        }
                                     }
                                 } catch (e) {
                                     console.warn('解析流式响应失败:', e);
@@ -970,9 +1375,15 @@
                             }
                         }
                     }
+                    
+                    // 流式读取完成后清除超时
+                    if (timeoutId) clearTimeout(timeoutId);
+                    console.log('[API] 流式读取完成，清除超时');
                 }
                 
-                clearInterval(renderInterval);
+                if (renderFrameId) {
+                    cancelAnimationFrame(renderFrameId);
+                }
                 
                 let restoredThinking = thinkingContent;
                 let restoredAnswer = answerContent || fullResponse;
@@ -990,15 +1401,23 @@
                 const thinkingDiv = thinkingContainer.querySelector('.thinking-content');
                 const thinkingHeader = thinkingContainer.querySelector('.thinking-header');
                 
-                if (restoredThinking && restoredThinking.trim().replace('[思考]', '').trim()) {
+                console.log('[COT] 最终思考内容:', restoredThinking ? restoredThinking.substring(0, 100) : '无');
+                console.log('[COT] 最终回答内容:', restoredAnswer ? restoredAnswer.substring(0, 100) : '无');
+                
+                if (restoredThinking && restoredThinking.trim().length > 0) {
                     thinkingContainer.style.display = 'block';
                     thinkingDiv.innerHTML = displayDesensitize(marked.parse(restoredThinking.replace('[思考]', '').trim()));
                     thinkingHeader.classList.add('expanded');
                     thinkingHeader.querySelector('.toggle-icon').textContent = '▼';
                 } else {
-                    thinkingContainer.style.display = 'none';
+                    // 如果没有[思考]标记，显示默认思考过程
+                    thinkingContainer.style.display = 'block';
+                    thinkingDiv.innerHTML = displayDesensitize(marked.parse('正在分析您的请求...'));
+                    thinkingHeader.classList.add('expanded');
+                    thinkingHeader.querySelector('.toggle-icon').textContent = '▼';
                 }
                 
+                // 回答内容（不含思考过程）
                 streamContent.innerHTML = displayDesensitize(marked.parse(restoredAnswer.replace('[回答]', '').trim()));
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 
@@ -1077,6 +1496,158 @@
             image_analysis: '\n\n分析图片内容：内容摘要、分类标签、关键信息、整理建议。用Markdown输出。'
         };
         
+        // 文件分析和智能建议系统
+        function analyzeUploadedFile(file, content) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            const result = {
+                fileType: ext,
+                domain: 'general',
+                features: [],
+                summary: '',
+                suggestions: '',
+                suggestionButtons: []
+            };
+            
+            // 分析文件类型
+            const typeMap = {
+                'xlsx': { name: 'Excel表格', icon: '📊' },
+                'xls': { name: 'Excel表格', icon: '📊' },
+                'docx': { name: 'Word文档', icon: '📄' },
+                'doc': { name: 'Word文档', icon: '📄' },
+                'pdf': { name: 'PDF文档', icon: '📕' },
+                'txt': { name: '文本文件', icon: '📝' }
+            };
+            
+            const fileInfo = typeMap[ext] || { name: '其他文件', icon: '📁' };
+            
+            // 分析内容关键词，确定领域
+            const contentLower = content.toLowerCase();
+            
+            // 财务领域关键词
+            const financeKeywords = ['金额', '费用', '预算', '成本', '收入', '支出', '利润', '报销', '报表', '财务', '记账', '工资', '薪酬'];
+            // 人事领域关键词
+            const hrKeywords = ['姓名', '职位', '部门', '入职', '离职', '考勤', '绩效', '招聘', '员工'];
+            // 安全领域关键词
+            const safetyKeywords = ['安全', '操作', '风险', '防护', '事故', '检查', '设备', '规范'];
+            // 数据统计关键词
+            const dataKeywords = ['统计', '分析', '汇总', '对比', '趋势', '报表', '图表', '数据'];
+            
+            if (financeKeywords.some(k => contentLower.includes(k))) {
+                result.domain = 'finance';
+                result.features.push('财务数据');
+            } else if (hrKeywords.some(k => contentLower.includes(k))) {
+                result.domain = 'hr';
+                result.features.push('人事信息');
+            } else if (safetyKeywords.some(k => contentLower.includes(k))) {
+                result.domain = 'safety';
+                result.features.push('安全信息');
+            }
+            
+            if (dataKeywords.some(k => contentLower.includes(k))) {
+                result.features.push('数据分析');
+            }
+            
+            // 分析数据量
+            const lineCount = content.split('\n').length;
+            if (lineCount > 100) {
+                result.features.push('大数据量');
+            }
+            
+            // 生成摘要
+            result.summary = `${fileInfo.icon} **文件类型**: ${fileInfo.name}\n🏷️ **识别特征**: ${result.features.length > 0 ? result.features.join('、') : '暂无'}`;
+            
+            // 根据领域生成建议提示词
+            const suggestionTemplates = {
+                finance: [
+                    { label: '💰 财务数据分析', prompt: '请分析这份财务数据，生成费用明细汇总、收支对比和异常分析报告' },
+                    { label: '📈 成本统计报表', prompt: '请统计各项成本支出，生成成本分析报表和优化建议' },
+                    { label: '📋 报销审核', prompt: '请审核这份报销单据，检查是否符合规定，并列出需要补充的项目' }
+                ],
+                hr: [
+                    { label: '👥 人员信息汇总', prompt: '请汇总员工信息，生成人员统计表和部门分布分析' },
+                    { label: '📊 考勤数据分析', prompt: '请分析考勤数据，统计迟到早退情况，生成考勤报告' },
+                    { label: '💼 招聘方案', prompt: '请根据岗位需求，生成招聘方案和面试评估表' }
+                ],
+                safety: [
+                    { label: '🛡️ 安全风险评估', prompt: '请评估安全风险，列出潜在隐患和整改建议' },
+                    { label: '📋 设备检查报告', prompt: '请生成设备检查报告，列出需要维护的设备和维护建议' },
+                    { label: '⚠️ 应急预案', prompt: '请根据安全规范，生成应急预案和操作流程' }
+                ],
+                general: [
+                    { label: '📝 内容摘要', prompt: '请总结这份文件的核心内容，生成内容摘要' },
+                    { label: '📊 数据分析', prompt: '请分析文件中的数据，生成统计报表和可视化建议' },
+                    { label: '🔍 关键词提取', prompt: '请提取文件中的关键词，分析文件主题和重点内容' }
+                ]
+            };
+            
+            const suggestions = suggestionTemplates[result.domain] || suggestionTemplates.general;
+            
+            result.suggestions = '💡 推荐分析方向：';
+            suggestions.forEach((s, i) => {
+                result.suggestions += `\n${i + 1}. ${s.label}`;
+                result.suggestionButtons.push(s);
+            });
+            
+            return result;
+        }
+        
+        // 显示智能建议按钮
+        function showSmartSuggestions(suggestions) {
+            // 清除之前的建议
+            const existingSuggestions = document.getElementById('smart-suggestions');
+            if (existingSuggestions) {
+                existingSuggestions.remove();
+            }
+            
+            if (!suggestions || suggestions.length === 0) return;
+            
+            const suggestionsDiv = document.createElement('div');
+            suggestionsDiv.id = 'smart-suggestions';
+            suggestionsDiv.style.cssText = `
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin-bottom: 15px;
+                padding: 15px;
+                background: rgba(255,255,255,0.05);
+                border-radius: 12px;
+                border: 1px solid rgba(255,255,255,0.1);
+            `;
+            
+            suggestions.forEach((s, i) => {
+                const btn = document.createElement('button');
+                btn.textContent = s.label;
+                btn.style.cssText = `
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 20px;
+                    background: linear-gradient(135deg, rgba(66,165,245,0.3), rgba(30,136,229,0.3));
+                    color: white;
+                    font-size: 14px;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                    border: 1px solid rgba(66,165,245,0.3);
+                `;
+                btn.onmouseover = function() {
+                    this.style.background = 'linear-gradient(135deg, rgba(66,165,245,0.5), rgba(30,136,229,0.5))';
+                    this.style.transform = 'translateY(-2px)';
+                };
+                btn.onmouseout = function() {
+                    this.style.background = 'linear-gradient(135deg, rgba(66,165,245,0.3), rgba(30,136,229,0.3))';
+                    this.style.transform = 'translateY(0)';
+                };
+                btn.onclick = function() {
+                    userInput.value = s.prompt;
+                    suggestionsDiv.remove();
+                    debounceSendMessage();
+                };
+                suggestionsDiv.appendChild(btn);
+            });
+            
+            const chatInputArea = document.querySelector('.chat-input-area');
+            chatInputArea.insertBefore(suggestionsDiv, chatInputArea.firstChild);
+        }
+        
         function detectRequestType(text) {
             const hrKeywords = ['人事', '招聘', '招收', '入职', '面试', '简历', '招人', '招聘方案', '招人计划', '人员需求', '岗位招聘', '聘用', '雇佣', '招募'];
             const internshipKeywords = ['实习', '实习生', '性格', '培训计划', '考核', '实习生安排', '实习计划', '实习岗位', '实习安排', '暑期实习', '应届', '毕业实习'];
@@ -1104,12 +1675,15 @@
             return null;
         }
         
-        function truncateContent(content, maxLength = 3000) {
+        // 优化文件内容截断策略：保留头部和尾部核心信息
+        function truncateContent(content, maxLength = 1500) {
             if (!content || content.length <= maxLength) {
                 return content;
             }
-            const half = Math.floor(maxLength / 2);
-            return content.substring(0, half) + '\n...（内容已截断，保留核心信息）\n' + content.substring(content.length - half);
+            // 保留前500字符（标题和开头）+ 后1000字符（数据部分）
+            const headLength = 500;
+            const tailLength = maxLength - headLength;
+            return content.substring(0, headLength) + '\n...（内容已截断，保留核心数据）\n' + content.substring(content.length - tailLength);
         }
 
         let lastRequestTime = 0;
@@ -1117,9 +1691,72 @@
         let requestCount = 0;
         const MAX_REQUESTS_PER_MINUTE = 60;
 
+        // 缓存配置
+        const CACHE_TTL = 86400000; // 24小时（延长缓存时间）
+        const MAX_CACHE_SIZE = 200; // 增加缓存数量
+        const MAX_FILE_CACHE_SIZE = 50; // 文件缓存数量
+        
+        // 内存缓存（快速访问）
         const requestCache = new Map();
-        const CACHE_TTL = 1800000; // 30分钟
-        const MAX_CACHE_SIZE = 500;
+        const fileHashCache = new Map(); // 文件哈希缓存
+        
+        // 从localStorage加载持久化缓存
+        function loadPersistentCache() {
+            try {
+                const stored = localStorage.getItem('port_request_cache');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    parsed.forEach(item => {
+                        requestCache.set(item.key, { response: item.response, timestamp: item.timestamp });
+                    });
+                }
+                
+                const fileStored = localStorage.getItem('port_file_cache');
+                if (fileStored) {
+                    const parsed = JSON.parse(fileStored);
+                    parsed.forEach(item => {
+                        fileHashCache.set(item.hash, { response: item.response, timestamp: item.timestamp, fileName: item.fileName });
+                    });
+                }
+            } catch (e) {
+                console.error('加载持久化缓存失败:', e);
+            }
+        }
+        
+        // 保存持久化缓存
+        function savePersistentCache() {
+            try {
+                const cacheArray = Array.from(requestCache.entries()).map(([key, value]) => ({
+                    key, response: value.response, timestamp: value.timestamp
+                }));
+                localStorage.setItem('port_request_cache', JSON.stringify(cacheArray));
+                
+                const fileCacheArray = Array.from(fileHashCache.entries()).map(([hash, value]) => ({
+                    hash, response: value.response, timestamp: value.timestamp, fileName: value.fileName
+                }));
+                localStorage.setItem('port_file_cache', JSON.stringify(fileCacheArray));
+            } catch (e) {
+                console.error('保存持久化缓存失败:', e);
+            }
+        }
+        
+        // 加载缓存
+        loadPersistentCache();
+
+        // 简单关键词匹配（替代Levenshtein距离，提高性能）
+        function keywordsMatch(text1, text2) {
+            const words1 = text1.toLowerCase().split(/[\s,，。！？、]+/).filter(w => w.length >= 2);
+            const words2 = text2.toLowerCase().split(/[\s,，。！？、]+/).filter(w => w.length >= 2);
+            
+            if (words1.length === 0 || words2.length === 0) return 0;
+            
+            let matches = 0;
+            words1.forEach(w1 => {
+                if (words2.includes(w1)) matches++;
+            });
+            
+            return matches / Math.max(words1.length, words2.length);
+        }
 
         // 计算两个字符串的相似度（Levenshtein距离）
         function calculateSimilarity(str1, str2) {
@@ -1188,6 +1825,30 @@
                 )[0];
                 requestCache.delete(oldestKey);
             }
+            savePersistentCache();
+        }
+        
+        // 获取文件哈希缓存（重复文件秒级响应）
+        function getFileHashCache(fileHash) {
+            const cached = fileHashCache.get(fileHash);
+            if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+                console.log('[CACHE] 文件哈希命中:', fileHash);
+                return cached;
+            }
+            return null;
+        }
+        
+        // 设置文件哈希缓存
+        function setFileHashCache(fileHash, response, fileName) {
+            fileHashCache.set(fileHash, { response, timestamp: Date.now(), fileName });
+            // 超过最大缓存数量时，删除最旧的缓存
+            if (fileHashCache.size > MAX_FILE_CACHE_SIZE) {
+                const oldestKey = Array.from(fileHashCache.keys()).sort((a, b) => 
+                    fileHashCache.get(a).timestamp - fileHashCache.get(b).timestamp
+                )[0];
+                fileHashCache.delete(oldestKey);
+            }
+            savePersistentCache();
         }
         
         function preFlightSecurityCheck(content) {
@@ -1297,16 +1958,18 @@
             }).filter(h => h.user || h.assistant);
 
             const cotEnabled = document.getElementById('cot-toggle')?.checked || false;
+            console.log('[COT] 思考过程开关状态:', cotEnabled);
             
-            let systemPrompt = '港口财务助手，简洁专业回答。';
-            let maxTokens = 800;
+            let systemPrompt = '';
+            let maxTokens = 300;
             
+            // 仅在开启COT时添加思考过程要求
             if (cotEnabled) {
-                systemPrompt = '先简述分析思路，再回答。用[思考]和[回答]标记分隔。';
-                maxTokens = 800;
+                systemPrompt = '专业财务分析助手。请按格式回答：[思考]分析思路[回答]最终答案。必须包含[思考]和[回答]标记。';
+                maxTokens = 500;
             } else {
-                // 默认也启用思考过程，确保[思考]和[回答]标记被输出
-                systemPrompt = '先简述分析思路，再回答。用[思考]和[回答]标记分隔。';
+                systemPrompt = '专业财务分析助手。直接给出简洁准确的最终答案，不需要思考过程。';
+                maxTokens = 300;
             }
 
             const messages = [{
@@ -1387,6 +2050,8 @@
                 // 按优先级排序的线路列表
                 const sortedEndpoints = [...apiEndpoints].sort((a, b) => a.priority - b.priority);
                 
+                let lastError = null;
+                
                 for (const ep of sortedEndpoints) {
                     try {
                         console.log('[API] 尝试发送请求到:', ep.name);
@@ -1402,11 +2067,12 @@
                                 model: 'doubao-seed-2-1-turbo-260628',
                                 messages: messages,
                                 stream: true,
-                                temperature: 0.5,
-                                top_p: 0.7,
+                                temperature: 0.3, // 降低随机性，提高生成速度
+                                top_p: 0.5, // 缩小采样范围，提高生成速度
                                 max_tokens: maxTokens,
                                 presence_penalty: 0,
-                                frequency_penalty: 0
+                                frequency_penalty: 0,
+                                stop: ['\n\n'] // 添加停止词，减少不必要的输出
                             }),
                             signal: controller.signal
                         });
@@ -1416,33 +2082,142 @@
                             console.log('[API] 响应成功，开始读取流式数据');
                             return response;
                         }
+                        
+                        // 处理非2xx响应（如401、429、500等）
+                        let errorInfo = {};
+                        try {
+                            errorInfo = await response.json();
+                        } catch {
+                            errorInfo = { message: await response.text() };
+                        }
+                        
+                        const errorRecord = {
+                            timestamp: new Date().toISOString(),
+                            status: response.status,
+                            statusText: response.statusText,
+                            endpoint: ep.name,
+                            error: errorInfo
+                        };
+                        
+                        console.error('[API] 线路', ep.name, '返回错误:', JSON.stringify(errorRecord, null, 2));
+                        
+                        // 自动化分析错误原因
+                        const errorAnalysis = analyzeApiError(response.status, errorInfo);
+                        console.error('[API] 错误分析:', errorAnalysis);
+                        
+                        lastError = new Error(`线路 ${ep.name} 返回错误: ${response.status} ${response.statusText}`);
+                        
+                        // 认证错误不重试其他线路
+                        if (response.status === 401 || response.status === 403) {
+                            throw new Error('API密钥无效或权限不足');
+                        }
+                        
+                        // 限流错误不重试其他线路（所有线路共享限流）
+                        if (response.status === 429) {
+                            throw new Error('请求过于频繁，请稍后再试');
+                        }
+                        
                     } catch (e) {
                         console.warn('[API] 线路', ep.name, '失败:', e.message);
+                        lastError = e;
+                        // 超时或网络错误继续尝试下一条线路
                     }
+                    
+                    // 故障转移时添加短暂延迟
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 }
-                throw new Error('所有线路均连接失败');
+                
+                throw lastError || new Error('所有线路均连接失败');
+            }
+            
+            // 自动化分析API错误原因
+            function analyzeApiError(status, errorInfo) {
+                const analysis = {
+                    status: status,
+                    code: errorInfo.code || 'UNKNOWN',
+                    message: errorInfo.message || '未知错误',
+                    cause: '未知',
+                    suggestion: '请联系管理员'
+                };
+                
+                switch (status) {
+                    case 400:
+                        analysis.cause = '请求参数错误';
+                        analysis.suggestion = '请检查请求格式或参数';
+                        break;
+                    case 401:
+                        analysis.cause = 'API密钥无效或已过期';
+                        analysis.suggestion = '请检查并更新API密钥';
+                        break;
+                    case 403:
+                        analysis.cause = '权限不足，模型未开通或配额用完';
+                        analysis.suggestion = '请检查API密钥权限和配额';
+                        break;
+                    case 429:
+                        analysis.cause = '请求频率超限或配额用尽';
+                        analysis.suggestion = '请稍后再试或联系管理员增加配额';
+                        break;
+                    case 500:
+                        analysis.cause = '服务器内部错误';
+                        analysis.suggestion = '请稍后再试';
+                        break;
+                    case 502:
+                        analysis.cause = '网关错误';
+                        analysis.suggestion = '请稍后再试或切换API线路';
+                        break;
+                    case 503:
+                        analysis.cause = '服务不可用';
+                        analysis.suggestion = '请稍后再试';
+                        break;
+                    case 504:
+                        analysis.cause = '网关超时';
+                        analysis.suggestion = '请稍后再试';
+                        break;
+                    default:
+                        analysis.cause = '未知错误';
+                        analysis.suggestion = '请联系管理员';
+                }
+                
+                return analysis;
             }
             
             try {
                 const response = await sendRequestWithFailover(apiKey, messages, maxTokens, controller);
 
-                clearTimeout(timeoutId);
-
                 console.log('[API] 响应状态:', response.status, response.statusText);
-                
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('豆包API调用失败:', response.status, response.statusText, errorText);
-                    throw new Error('API调用失败: ' + response.status + ' ' + response.statusText);
-                }
 
-                const result = { body: response.body, mapping: null, cacheKey: cacheKey };
+                const result = { body: response.body, mapping: null, cacheKey: cacheKey, timeoutId: timeoutId };
                 return result;
             } catch (fetchError) {
                 clearTimeout(timeoutId);
                 console.error('[API] 请求失败:', fetchError);
                 console.error('[API] 请求失败详情:', fetchError.stack);
-                showToast('网络连接失败，请检查网络后重试', 'error');
+                
+                // 区分不同类型的错误
+                let errorMessage = '网络连接失败，请检查网络后重试';
+                let errorType = 'error';
+                
+                if (fetchError.message.includes('aborted')) {
+                    errorMessage = '请求超时，请稍后再试';
+                    errorType = 'warning';
+                } else if (fetchError.message.includes('API密钥')) {
+                    errorMessage = 'API密钥无效或权限不足，请检查密钥配置';
+                    errorType = 'error';
+                } else if (fetchError.message.includes('权限')) {
+                    errorMessage = 'API权限不足，请联系管理员';
+                    errorType = 'error';
+                } else if (fetchError.message.includes('频繁')) {
+                    errorMessage = '请求过于频繁，请稍后再试';
+                    errorType = 'warning';
+                } else if (fetchError.message.includes('所有线路')) {
+                    errorMessage = '所有API线路均连接失败，请稍后再试';
+                    errorType = 'error';
+                } else if (fetchError.message.includes('服务器')) {
+                    errorMessage = '服务器繁忙，请稍后再试';
+                    errorType = 'warning';
+                }
+                
+                showToast(errorMessage, errorType);
                 throw new Error('请求失败: ' + (fetchError.message || '网络错误'));
             }
         }
@@ -2212,6 +2987,15 @@ ${historySummary}
         
         function closeSecurityModal() {
             document.getElementById('security-modal').classList.remove('active');
+        }
+        
+        function openSessionModal() {
+            document.getElementById('session-modal').classList.add('active');
+            renderSessionList();
+        }
+        
+        function closeSessionModal() {
+            document.getElementById('session-modal').classList.remove('active');
         }
         
         function updateSecuritySettings() {

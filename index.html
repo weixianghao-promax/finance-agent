@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -879,10 +879,9 @@
 
         let uploadAuditLog = [];
 
-        // 双后端配置：主后端 + 备用后端（部署后请替换为实际域名）
+        // 后端配置：阿里云函数计算（部署后请替换为实际域名）
         const BACKEND_ENDPOINTS = [
-            'https://finance-agent-production.up.railway.app',  // 主：Koyeb/Railway（占位，部署后替换）
-            'https://weixianghao-finance-agent.hf.space'        // 备：HuggingFace（占位，部署后替换）
+            'https://xxxxxxx.cn-hangzhou.fc.aliyuncs.com/2016-08-15/proxy/finance-agent-service/finance-agent/',  // 阿里云函数计算（占位，部署后替换）
         ];
 
         // 缓存可用后端索引，避免每次请求都健康检查

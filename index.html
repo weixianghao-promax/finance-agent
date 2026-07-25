@@ -170,7 +170,7 @@
 </head>
 <body>
     <div id="github-pages-banner" style="display:none; background: linear-gradient(135deg, #4caf50, #2e7d32); color: white; padding: 12px 20px; text-align: center; font-size: 14px; position: sticky; top: 0; z-index: 9999;">
-        ✅ <strong>云端模式：</strong>已连接云端后端（主备双节点），所有功能可用。也可通过本地地址 <a href="http://localhost:8000" style="color: #fff; text-decoration: underline; font-weight: bold;">http://localhost:8000</a> 访问。
+        ✅ <strong>云端模式：</strong>已连接阿里云函数计算后端，所有功能可用。后端地址：<a href="https://finance-agent-zkugysiood.cn-hangzhou.fcapp.run" style="color: #fff; text-decoration: underline; font-weight: bold;">finance-agent-zkugysiood.cn-hangzhou.fcapp.run</a>
     </div>
     <div class="sidebar">
         <h3>⚡ 快捷功能</h3>
@@ -879,9 +879,9 @@
 
         let uploadAuditLog = [];
 
-        // 后端配置：阿里云函数计算（部署后请替换为实际域名）
+        // 后端配置：阿里云函数计算
         const BACKEND_ENDPOINTS = [
-            'https://xxxxxxx.cn-hangzhou.fc.aliyuncs.com/2016-08-15/proxy/finance-agent-service/finance-agent/',  // 阿里云函数计算（占位，部署后替换）
+            'https://finance-agent-zkugysiood.cn-hangzhou.fcapp.run',
         ];
 
         // 缓存可用后端索引，避免每次请求都健康检查

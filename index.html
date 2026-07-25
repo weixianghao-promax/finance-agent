@@ -169,8 +169,8 @@
     </style>
 </head>
 <body>
-    <div id="github-pages-banner" style="display:none; background: linear-gradient(135deg, #ff6b6b, #ee5a24); color: white; padding: 12px 20px; text-align: center; font-size: 14px; position: sticky; top: 0; z-index: 9999;">
-        ⚠️ <strong>提示：</strong>当前为GitHub Pages静态预览版本，API功能不可用。请通过本地地址 <a href="http://localhost:8000" style="color: #fff; text-decoration: underline; font-weight: bold;">http://localhost:8000</a> 访问以使用完整功能。
+    <div id="github-pages-banner" style="display:none; background: linear-gradient(135deg, #4caf50, #2e7d32); color: white; padding: 12px 20px; text-align: center; font-size: 14px; position: sticky; top: 0; z-index: 9999;">
+        ✅ <strong>云端模式：</strong>已连接云端后端（主备双节点），所有功能可用。也可通过本地地址 <a href="http://localhost:8000" style="color: #fff; text-decoration: underline; font-weight: bold;">http://localhost:8000</a> 访问。
     </div>
     <div class="sidebar">
         <h3>⚡ 快捷功能</h3>
@@ -879,16 +879,80 @@
 
         let uploadAuditLog = [];
 
-        // API基础URL配置（根据运行环境自动检测）
-        // GitHub Pages环境：不连接localhost，仅本地环境使用相对路径
+        // 双后端配置：主后端 + 备用后端（部署后请替换为实际域名）
+        const BACKEND_ENDPOINTS = [
+            'https://finance-agent-production.up.railway.app',  // 主：Koyeb/Railway（占位，部署后替换）
+            'https://weixianghao-finance-agent.hf.space'        // 备：HuggingFace（占位，部署后替换）
+        ];
+
+        // 缓存可用后端索引，避免每次请求都健康检查
+        let activeBackendIndex = parseInt(localStorage.getItem('active_backend_idx') || '0', 10);
+        let lastHealthCheck = parseInt(localStorage.getItem('last_health_check') || '0', 10);
+        const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000;  // 5分钟检查一次
+
+        // 健康检查：测试后端是否可用
+        async function checkBackendHealth(baseUrl) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000);
+                const res = await fetch(baseUrl + '/health', {
+                    method: 'GET',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                if (res.ok) {
+                    const data = await res.json();
+                    return data.status === 'healthy';
+                }
+                return false;
+            } catch (e) {
+                console.warn('[HEALTH]', baseUrl, '健康检查失败:', e.message);
+                return false;
+            }
+        }
+
+        // 选择可用后端：主用失败则自动切换备用
+        async function selectAvailableBackend() {
+            const now = Date.now();
+            // 缓存有效期内直接返回当前后端
+            if (now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
+                return BACKEND_ENDPOINTS[activeBackendIndex];
+            }
+            console.log('[BACKEND] 开始健康检查...');
+            for (let i = 0; i < BACKEND_ENDPOINTS.length; i++) {
+                const url = BACKEND_ENDPOINTS[i];
+                const healthy = await checkBackendHealth(url);
+                console.log('[BACKEND]', url, healthy ? '✅ 可用' : '❌ 不可用');
+                if (healthy) {
+                    activeBackendIndex = i;
+                    localStorage.setItem('active_backend_idx', String(i));
+                    localStorage.setItem('last_health_check', String(now));
+                    console.log('[BACKEND] 选用后端:', url);
+                    return url;
+                }
+            }
+            // 全部不可用，返回主后端（让请求报错给用户看）
+            console.error('[BACKEND] 所有后端均不可用！');
+            return BACKEND_ENDPOINTS[0];
+        }
+
+        // API基础URL配置：本地用相对路径，GitHub Pages用双后端
         const getApiBaseUrl = function() {
             if (window.location.hostname.includes('github.io')) {
-                console.log('[API] GitHub Pages环境，不连接本地后端');
-                return '';
+                console.log('[API] GitHub Pages环境，使用云端后端');
+                return BACKEND_ENDPOINTS[activeBackendIndex];
             }
             console.log('[API] 本地环境，使用相对路径');
             return '';
         };
+
+        // 异步版：请求前调用，确保选用可用后端
+        async function getApiBaseUrlAsync() {
+            if (window.location.hostname.includes('github.io')) {
+                return await selectAvailableBackend();
+            }
+            return '';
+        }
 
         // 使用浏览器原生SHA-256生成文件哈希
         // 优势：最快（硬件加速）、最稳定、零依赖、无需国外网络
@@ -2091,30 +2155,54 @@
             console.log('[API] 通过后端代理调用 /api/v1/chat/stream');
             
             async function sendRequestWithFailover(apiKey, messages, maxTokens, controller) {
-                try {
-                    // 根据运行环境自动选择API基础URL
-                    const apiBase = getApiBaseUrl();
-                    const apiUrl = apiBase + '/api/v1/chat/stream';
-                    console.log('[API] 请求URL:', apiUrl);
-                    
-                    const response = await fetch(apiUrl, {
+                // GitHub Pages环境下，请求前先选择可用后端
+                let apiBase = '';
+                if (window.location.hostname.includes('github.io')) {
+                    apiBase = await getApiBaseUrlAsync();
+                } else {
+                    apiBase = getApiBaseUrl();
+                }
+                console.log('[API] 选用后端:', apiBase);
+                
+                const reqBody = JSON.stringify({
+                    message: fullUserMessage,
+                    chat_history: historyToSend,
+                    file_content: desensitizedFileContent || null,
+                    file_desensitized: true
+                });
+                const reqHeaders = { 'Content-Type': 'application/json' };
+
+                async function doFetch(baseUrl) {
+                    return await fetch(baseUrl + '/api/v1/chat/stream', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            message: fullUserMessage,
-                            chat_history: historyToSend,
-                            file_content: desensitizedFileContent || null,
-                            file_desensitized: true
-                        }),
+                        headers: reqHeaders,
+                        body: reqBody,
                         signal: controller.signal
                     });
+                }
 
+                try {
+                    let response = await doFetch(apiBase);
                     if (response.ok) {
                         console.log('[API] 响应状态:', response.status, response.statusText);
                         console.log('[API] 响应成功，开始读取流式数据');
                         return response;
+                    }
+
+                    // GitHub Pages环境下：主后端非2xx，尝试备用后端
+                    if (window.location.hostname.includes('github.io') && BACKEND_ENDPOINTS.length > 1) {
+                        const currentIdx = activeBackendIndex;
+                        const nextIdx = (currentIdx + 1) % BACKEND_ENDPOINTS.length;
+                        const nextUrl = BACKEND_ENDPOINTS[nextIdx];
+                        console.warn('[API] 主后端返回非2xx，尝试备用后端:', nextUrl);
+                        response = await doFetch(nextUrl);
+                        if (response.ok) {
+                            activeBackendIndex = nextIdx;
+                            localStorage.setItem('active_backend_idx', String(nextIdx));
+                            localStorage.setItem('last_health_check', String(Date.now()));
+                            console.log('[API] 备用后端响应成功，已切换为活跃后端');
+                            return response;
+                        }
                     }
                     
                     // 处理非2xx响应
@@ -2129,6 +2217,24 @@
                     throw new Error(`后端返回错误: ${response.status} ${response.statusText}`);
                     
                 } catch (e) {
+                    // GitHub Pages环境下：网络错误也尝试备用后端
+                    if (window.location.hostname.includes('github.io') && BACKEND_ENDPOINTS.length > 1) {
+                        const nextIdx = (activeBackendIndex + 1) % BACKEND_ENDPOINTS.length;
+                        const nextUrl = BACKEND_ENDPOINTS[nextIdx];
+                        console.warn('[API] 网络错误，尝试备用后端:', nextUrl, e.message);
+                        try {
+                            const response = await doFetch(nextUrl);
+                            if (response.ok) {
+                                activeBackendIndex = nextIdx;
+                                localStorage.setItem('active_backend_idx', String(nextIdx));
+                                localStorage.setItem('last_health_check', String(Date.now()));
+                                console.log('[API] 备用后端响应成功，已切换为活跃后端');
+                                return response;
+                            }
+                        } catch (e2) {
+                            console.error('[API] 备用后端也失败:', e2.message);
+                        }
+                    }
                     console.warn('[API] 后端请求失败:', e.message);
                     throw new Error('后端服务连接失败，请检查后端服务是否启动');
                 }

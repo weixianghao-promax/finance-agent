@@ -169,9 +169,6 @@
     </style>
 </head>
 <body>
-    <div id="github-pages-banner" style="display:none; background: linear-gradient(135deg, #4caf50, #2e7d32); color: white; padding: 12px 20px; text-align: center; font-size: 14px; position: sticky; top: 0; z-index: 9999;">
-        ✅ <strong>云端模式：</strong>已连接豆包API（前端直连），所有功能可用。当前线路：<span id="current-endpoint">自动选择中...</span>
-    </div>
     <div class="sidebar">
         <h3>⚡ 快捷功能</h3>
         <button class="quick-btn financial" onclick="generateAnnualFinancialReport()">📊 年度财务整合</button>
@@ -894,7 +891,8 @@
             { name: '北京', url: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', priority: 5 },
             { name: '新加坡', url: 'https://ark.ap-singapore.volces.com/api/v3/chat/completions', priority: 6 }
         ];
-        const DOUBAO_MODEL = 'doubao-1-5-pro-32k';
+        const DOUBAO_MODEL = 'doubao-seed-2-1-turbo-260628';
+        const DOUBAO_TEMPERATURE = 0.5;
 
         // 缓存最优线路（5分钟有效期）
         let cachedFastestEndpoint = DOUBAO_API_ENDPOINTS[0];
@@ -944,21 +942,6 @@
             }
         }
         
-        // 更新banner显示当前环境
-        document.addEventListener('DOMContentLoaded', function() {
-            const banner = document.getElementById('github-pages-banner');
-            const endpointSpan = document.getElementById('current-endpoint');
-            if (banner && endpointSpan) {
-                banner.style.display = 'block';
-                if (isLocalhost) {
-                    banner.style.background = 'linear-gradient(135deg, #ff9800, #f57c00)';
-                    endpointSpan.textContent = '本地代理模式';
-                } else {
-                    endpointSpan.textContent = '豆包API直连';
-                }
-            }
-        });
-
         // 使用浏览器原生SHA-256生成文件哈希
         // 优势：最快（硬件加速）、最稳定、零依赖、无需国外网络
         async function generateFileHash(content) {
@@ -2128,7 +2111,7 @@
                         messages: messages,
                         stream: true,
                         max_tokens: maxTokens,
-                        temperature: 0.7
+                        temperature: DOUBAO_TEMPERATURE
                     });
                     reqHeaders = {
                         'Content-Type': 'application/json',
@@ -3315,15 +3298,6 @@ ${historySummary}
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            // GitHub Pages环境检测与提示
-            if (window.location.hostname.includes('github.io')) {
-                const banner = document.getElementById('github-pages-banner');
-                if (banner) {
-                    banner.style.display = 'block';
-                }
-                console.log('[ENV] GitHub Pages环境，显示静态预览提示');
-            }
-            
             loadSecurityConfig();
             loadApiKey();
             if (chatHistory.length > 0) {

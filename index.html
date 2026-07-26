@@ -170,7 +170,7 @@
 </head>
 <body>
     <div id="github-pages-banner" style="display:none; background: linear-gradient(135deg, #4caf50, #2e7d32); color: white; padding: 12px 20px; text-align: center; font-size: 14px; position: sticky; top: 0; z-index: 9999;">
-        ✅ <strong>云端模式：</strong>已连接阿里云函数计算后端，所有功能可用。后端地址：<a href="https://finance-agent-zkugysiood.cn-hangzhou.fcapp.run" style="color: #fff; text-decoration: underline; font-weight: bold;">finance-agent-zkugysiood.cn-hangzhou.fcapp.run</a>
+        ✅ <strong>云端模式：</strong>已连接豆包API（前端直连），所有功能可用。当前线路：<span id="current-endpoint">自动选择中...</span>
     </div>
     <div class="sidebar">
         <h3>⚡ 快捷功能</h3>
@@ -879,6 +879,11 @@
 
         let uploadAuditLog = [];
 
+        // 环境检测：判断当前是本地开发环境还是GitHub Pages
+        const isLocalhost = window.location.hostname === 'localhost' || 
+                           window.location.hostname === '127.0.0.1' || 
+                           window.location.hostname.includes('192.168.');
+        
         // 豆包API直连配置（火山引擎多线路节点）
         // 前端直接调用，减少网络跳数，延迟降低30-50%
         const DOUBAO_API_ENDPOINTS = [
@@ -898,6 +903,10 @@
 
         // 获取当前最优线路（首次请求后台异步测速）
         function getBestEndpoint() {
+            // localhost环境下不使用多线路，直接走后端代理
+            if (isLocalhost) {
+                return { name: '本地代理', url: '/api/v1/chat/stream', priority: 0 };
+            }
             const now = Date.now();
             if (cachedFastestEndpoint && now - endpointCacheTimestamp < ENDPOINT_CACHE_TTL) {
                 return cachedFastestEndpoint;
@@ -910,8 +919,9 @@
             return DOUBAO_API_ENDPOINTS[0];
         }
 
-        // 后台异步测试所有线路延迟
+        // 后台异步测试所有线路延迟（仅在非localhost环境下执行）
         async function testAllEndpoints() {
+            if (isLocalhost) return;
             const pingPromises = DOUBAO_API_ENDPOINTS.map(async (ep) => {
                 const startTime = Date.now();
                 try {
@@ -933,6 +943,21 @@
                 console.log('[API] 最优线路:', cachedFastestEndpoint.name);
             }
         }
+        
+        // 更新banner显示当前环境
+        document.addEventListener('DOMContentLoaded', function() {
+            const banner = document.getElementById('github-pages-banner');
+            const endpointSpan = document.getElementById('current-endpoint');
+            if (banner && endpointSpan) {
+                banner.style.display = 'block';
+                if (isLocalhost) {
+                    banner.style.background = 'linear-gradient(135deg, #ff9800, #f57c00)';
+                    endpointSpan.textContent = '本地代理模式';
+                } else {
+                    endpointSpan.textContent = '豆包API直连';
+                }
+            }
+        });
 
         // 使用浏览器原生SHA-256生成文件哈希
         // 优势：最快（硬件加速）、最稳定、零依赖、无需国外网络
@@ -1024,7 +1049,7 @@
                 // 分析文件并生成智能建议
             const analysisResult = analyzeUploadedFile(file, desensitizedFullContent);
             
-            addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: Blake3\n\n预览：\n```\n' + previewContent + '\n```\n\n📥 已自动下载脱敏文件和密钥文件\n\n' + analysisResult.summary + '\n\n' + analysisResult.suggestions, 'assistant');
+            addMessage('✅ 文件上传成功：' + file.name + '（' + file.size + '字节）\n\n🔒 已自动完成本地离线脱敏处理\n📊 文件校验: SHA-256\n\n预览：\n```\n' + previewContent + '\n```\n\n📥 已自动下载脱敏文件和密钥文件\n\n' + analysisResult.summary + '\n\n' + analysisResult.suggestions, 'assistant');
             
             // 显示智能建议按钮
             showSmartSuggestions(analysisResult.suggestionButtons);
@@ -2081,18 +2106,35 @@
                 const bestEndpoint = getBestEndpoint();
                 console.log('[API] 选用线路:', bestEndpoint.name, bestEndpoint.url);
                 
-                // 构造OpenAI兼容格式的请求体
-                const reqBody = JSON.stringify({
-                    model: DOUBAO_MODEL,
-                    messages: messages,
-                    stream: true,
-                    max_tokens: maxTokens,
-                    temperature: 0.7
-                });
-                const reqHeaders = {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + apiKey
-                };
+                let reqBody, reqHeaders;
+                
+                if (isLocalhost) {
+                    // localhost模式：使用后端代理的请求格式（FastAPI ChatRequest）
+                    const userMessage = messages.find(m => m.role === 'user');
+                    reqBody = JSON.stringify({
+                        message: userMessage?.content || '',
+                        chat_history: [],
+                        file_content: desensitizedFileContent || null,
+                        filename: uploadedFileName || null,
+                        file_desensitized: !!desensitizedFileContent
+                    });
+                    reqHeaders = {
+                        'Content-Type': 'application/json'
+                    };
+                } else {
+                    // GitHub Pages模式：使用OpenAI兼容格式直连豆包API
+                    reqBody = JSON.stringify({
+                        model: DOUBAO_MODEL,
+                        messages: messages,
+                        stream: true,
+                        max_tokens: maxTokens,
+                        temperature: 0.7
+                    });
+                    reqHeaders = {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + apiKey
+                    };
+                }
 
                 async function doFetch(endpoint) {
                     return await fetch(endpoint.url, {
@@ -2103,9 +2145,6 @@
                     });
                 }
 
-                // 记录已尝试过的线路索引
-                let triedIndices = new Set();
-
                 try {
                     let response = await doFetch(bestEndpoint);
                     if (response.ok) {
@@ -2113,7 +2152,7 @@
                         return response;
                     }
 
-                    // 非2xx响应，尝试其他线路（按优先级顺序）
+                    // 非2xx响应
                     let errorInfo = {};
                     try {
                         errorInfo = await response.json();
@@ -2122,8 +2161,13 @@
                     }
                     
                     const firstStatus = response.status;
-                    console.warn('[API]', bestEndpoint.name, '返回', firstStatus, '尝试其他线路...');
-                    triedIndices.add(DOUBAO_API_ENDPOINTS.indexOf(bestEndpoint));
+                    console.warn('[API]', bestEndpoint.name, '返回', firstStatus, errorInfo.message || '');
+
+                    if (isLocalhost) {
+                        // localhost模式只有一个后端代理，失败后直接抛出错误
+                        const errMsg = errorInfo.detail || errorInfo.message || '后端代理请求失败';
+                        throw new Error(`后端代理请求失败 (${firstStatus}): ${errMsg}`);
+                    }
 
                     // 401/403是密钥问题，不用切换线路
                     if (firstStatus === 401 || firstStatus === 403) {
@@ -2131,7 +2175,8 @@
                         throw new Error(`API密钥无效或权限不足: ${errMsg}`);
                     }
 
-                    // 尝试其他线路
+                    // 尝试其他线路（仅非localhost模式）
+                    let triedIndices = new Set([DOUBAO_API_ENDPOINTS.indexOf(bestEndpoint)]);
                     for (let i = 0; i < DOUBAO_API_ENDPOINTS.length; i++) {
                         if (triedIndices.has(i)) continue;
                         const ep = DOUBAO_API_ENDPOINTS[i];
@@ -2155,14 +2200,18 @@
                     throw new Error(`所有API线路均不可用 (首站${firstStatus})`);
 
                 } catch (e) {
-                    // 如果是认证错误直接抛出
-                    if (e.message.includes('API密钥') || e.message.includes('认证')) {
+                    // 如果是认证错误或localhost代理错误直接抛出
+                    if (e.message.includes('API密钥') || e.message.includes('认证') || e.message.includes('后端代理')) {
                         throw e;
                     }
                     
-                    // 网络错误也尝试其他线路
+                    // 网络错误也尝试其他线路（仅非localhost模式）
+                    if (isLocalhost) {
+                        throw new Error('后端代理连接失败，请检查本地服务是否启动');
+                    }
+                    
                     console.warn('[API]', bestEndpoint.name, '网络错误:', e.message);
-                    triedIndices.add(DOUBAO_API_ENDPOINTS.indexOf(bestEndpoint));
+                    let triedIndices = new Set([DOUBAO_API_ENDPOINTS.indexOf(bestEndpoint)]);
                     
                     for (let i = 0; i < DOUBAO_API_ENDPOINTS.length; i++) {
                         if (triedIndices.has(i)) continue;

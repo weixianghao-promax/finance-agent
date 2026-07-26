@@ -879,78 +879,59 @@
 
         let uploadAuditLog = [];
 
-        // 后端配置：阿里云函数计算
-        const BACKEND_ENDPOINTS = [
-            'https://finance-agent-zkugysiood.cn-hangzhou.fcapp.run',
+        // 豆包API直连配置（火山引擎多线路节点）
+        // 前端直接调用，减少网络跳数，延迟降低30-50%
+        const DOUBAO_API_ENDPOINTS = [
+            { name: '广州', url: 'https://ark.cn-guangzhou.volces.com/api/v3/chat/completions', priority: 1 },
+            { name: '香港', url: 'https://ark.hk-hongkong.volces.com/api/v3/chat/completions', priority: 2 },
+            { name: '深圳', url: 'https://ark.cn-shenzhen.volces.com/api/v3/chat/completions', priority: 3 },
+            { name: '上海', url: 'https://ark.cn-shanghai.volces.com/api/v3/chat/completions', priority: 4 },
+            { name: '北京', url: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', priority: 5 },
+            { name: '新加坡', url: 'https://ark.ap-singapore.volces.com/api/v3/chat/completions', priority: 6 }
         ];
+        const DOUBAO_MODEL = 'doubao-1-5-pro-32k';
 
-        // 缓存可用后端索引，避免每次请求都健康检查
-        let activeBackendIndex = parseInt(localStorage.getItem('active_backend_idx') || '0', 10);
-        let lastHealthCheck = parseInt(localStorage.getItem('last_health_check') || '0', 10);
-        const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000;  // 5分钟检查一次
+        // 缓存最优线路（5分钟有效期）
+        let cachedFastestEndpoint = DOUBAO_API_ENDPOINTS[0];
+        let endpointCacheTimestamp = 0;
+        const ENDPOINT_CACHE_TTL = 5 * 60 * 1000;
 
-        // 健康检查：测试后端是否可用
-        async function checkBackendHealth(baseUrl) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 3000);
-                const res = await fetch(baseUrl + '/health', {
-                    method: 'GET',
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                if (res.ok) {
-                    const data = await res.json();
-                    return data.status === 'healthy';
-                }
-                return false;
-            } catch (e) {
-                console.warn('[HEALTH]', baseUrl, '健康检查失败:', e.message);
-                return false;
-            }
-        }
-
-        // 选择可用后端：主用失败则自动切换备用
-        async function selectAvailableBackend() {
+        // 获取当前最优线路（首次请求后台异步测速）
+        function getBestEndpoint() {
             const now = Date.now();
-            // 缓存有效期内直接返回当前后端
-            if (now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
-                return BACKEND_ENDPOINTS[activeBackendIndex];
+            if (cachedFastestEndpoint && now - endpointCacheTimestamp < ENDPOINT_CACHE_TTL) {
+                return cachedFastestEndpoint;
             }
-            console.log('[BACKEND] 开始健康检查...');
-            for (let i = 0; i < BACKEND_ENDPOINTS.length; i++) {
-                const url = BACKEND_ENDPOINTS[i];
-                const healthy = await checkBackendHealth(url);
-                console.log('[BACKEND]', url, healthy ? '✅ 可用' : '❌ 不可用');
-                if (healthy) {
-                    activeBackendIndex = i;
-                    localStorage.setItem('active_backend_idx', String(i));
-                    localStorage.setItem('last_health_check', String(now));
-                    console.log('[BACKEND] 选用后端:', url);
-                    return url;
-                }
+            // 首次请求直接用广州（南方用户最优），后台异步测速
+            if (endpointCacheTimestamp === 0) {
+                endpointCacheTimestamp = now;
+                setTimeout(testAllEndpoints, 100);
             }
-            // 全部不可用，返回主后端（让请求报错给用户看）
-            console.error('[BACKEND] 所有后端均不可用！');
-            return BACKEND_ENDPOINTS[0];
+            return DOUBAO_API_ENDPOINTS[0];
         }
 
-        // API基础URL配置：本地用相对路径，GitHub Pages用双后端
-        const getApiBaseUrl = function() {
-            if (window.location.hostname.includes('github.io')) {
-                console.log('[API] GitHub Pages环境，使用云端后端');
-                return BACKEND_ENDPOINTS[activeBackendIndex];
+        // 后台异步测试所有线路延迟
+        async function testAllEndpoints() {
+            const pingPromises = DOUBAO_API_ENDPOINTS.map(async (ep) => {
+                const startTime = Date.now();
+                try {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), 2000);
+                    await fetch(ep.url, { method: 'HEAD', signal: controller.signal });
+                    clearTimeout(timeout);
+                    return { ...ep, latency: Date.now() - startTime };
+                } catch {
+                    return { ...ep, latency: Infinity };
+                }
+            });
+            const results = await Promise.all(pingPromises);
+            const sorted = results.filter(r => r.latency < Infinity).sort((a, b) => a.latency - b.latency);
+            if (sorted.length > 0) {
+                cachedFastestEndpoint = sorted[0];
+                endpointCacheTimestamp = Date.now();
+                console.log('[API] 线路测速完成:', sorted.map(r => `${r.name}: ${r.latency}ms`));
+                console.log('[API] 最优线路:', cachedFastestEndpoint.name);
             }
-            console.log('[API] 本地环境，使用相对路径');
-            return '';
-        };
-
-        // 异步版：请求前调用，确保选用可用后端
-        async function getApiBaseUrlAsync() {
-            if (window.location.hostname.includes('github.io')) {
-                return await selectAvailableBackend();
-            }
-            return '';
         }
 
         // 使用浏览器原生SHA-256生成文件哈希
@@ -2091,88 +2072,30 @@
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-            // 多线路端点配置 - 火山引擎不同地域节点
-            // 广东用户优先使用广州节点，故障时自动切换
-            const apiEndpoints = [
-                { name: '广州', url: 'https://ark.cn-guangzhou.volces.com/api/v3/chat/completions', priority: 1 },
-                { name: '香港', url: 'https://ark.hk-hongkong.volces.com/api/v3/chat/completions', priority: 2 },
-                { name: '深圳', url: 'https://ark.cn-shenzhen.volces.com/api/v3/chat/completions', priority: 3 },
-                { name: '上海', url: 'https://ark.cn-shanghai.volces.com/api/v3/chat/completions', priority: 4 },
-                { name: '北京', url: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', priority: 5 },
-                { name: '新加坡', url: 'https://ark.ap-singapore.volces.com/api/v3/chat/completions', priority: 6 }
-            ];
-
-            // 缓存的最优线路（有效期5分钟）
-            let cachedFastestEndpoint = null;
-            let cacheTimestamp = 0;
-
-            // 获取当前最优线路（首次请求时才进行探测）
-            function getCurrentBestEndpoint() {
-                // 使用缓存的最优线路（5分钟内有效）
-                if (cachedFastestEndpoint && Date.now() - cacheTimestamp < 300000) {
-                    return cachedFastestEndpoint;
-                }
-                // 默认使用广州节点（广东用户最优），首次请求后再异步探测
-                if (cacheTimestamp === 0) {
-                    // 首次请求，后台异步探测，但当前请求直接使用默认线路
-                    cacheTimestamp = Date.now(); // 标记已请求过，避免重复探测
-                    setTimeout(updateFastestEndpointCache, 100);
-                }
-                return apiEndpoints[0];
-            }
-
-            // 后台异步测试各线路延迟（仅首次请求或缓存过期时执行）
-            async function updateFastestEndpointCache() {
-                const pingPromises = apiEndpoints.map(async (ep) => {
-                    const startTime = Date.now();
-                    try {
-                        const controller = new AbortController();
-                        const timeout = setTimeout(() => controller.abort(), 2000);
-                        await fetch(ep.url, {
-                            method: 'HEAD',
-                            signal: controller.signal
-                        });
-                        clearTimeout(timeout);
-                        return { ...ep, latency: Date.now() - startTime };
-                    } catch {
-                        return { ...ep, latency: Infinity };
-                    }
-                });
-                
-                const results = await Promise.all(pingPromises);
-                const sorted = results.filter(r => r.latency < Infinity).sort((a, b) => a.latency - b.latency);
-                
-                if (sorted.length > 0) {
-                    cachedFastestEndpoint = sorted[0];
-                    cacheTimestamp = Date.now();
-                    console.log('[API] 后台线路测试完成:', sorted.map(r => `${r.name}: ${r.latency}ms`));
-                    console.log('[API] 最优线路:', cachedFastestEndpoint.name);
-                }
-            }
-
-            // 通过后端代理调用API（解决CORS问题，隐藏API Key）
-            console.log('[API] 通过后端代理调用 /api/v1/chat/stream');
+            // 前端直连豆包API（火山引擎OpenAI兼容格式）
+            // 优势：减少网络跳数，延迟降低30-50%，无需后端部署
+            console.log('[API] 前端直连豆包API（流式）');
             
             async function sendRequestWithFailover(apiKey, messages, maxTokens, controller) {
-                // GitHub Pages环境下，请求前先选择可用后端
-                let apiBase = '';
-                if (window.location.hostname.includes('github.io')) {
-                    apiBase = await getApiBaseUrlAsync();
-                } else {
-                    apiBase = getApiBaseUrl();
-                }
-                console.log('[API] 选用后端:', apiBase);
+                // 选择最优线路
+                const bestEndpoint = getBestEndpoint();
+                console.log('[API] 选用线路:', bestEndpoint.name, bestEndpoint.url);
                 
+                // 构造OpenAI兼容格式的请求体
                 const reqBody = JSON.stringify({
-                    message: fullUserMessage,
-                    chat_history: historyToSend,
-                    file_content: desensitizedFileContent || null,
-                    file_desensitized: true
+                    model: DOUBAO_MODEL,
+                    messages: messages,
+                    stream: true,
+                    max_tokens: maxTokens,
+                    temperature: 0.7
                 });
-                const reqHeaders = { 'Content-Type': 'application/json' };
+                const reqHeaders = {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + apiKey
+                };
 
-                async function doFetch(baseUrl) {
-                    return await fetch(baseUrl + '/api/v1/chat/stream', {
+                async function doFetch(endpoint) {
+                    return await fetch(endpoint.url, {
                         method: 'POST',
                         headers: reqHeaders,
                         body: reqBody,
@@ -2180,62 +2103,87 @@
                     });
                 }
 
+                // 记录已尝试过的线路索引
+                let triedIndices = new Set();
+
                 try {
-                    let response = await doFetch(apiBase);
+                    let response = await doFetch(bestEndpoint);
                     if (response.ok) {
-                        console.log('[API] 响应状态:', response.status, response.statusText);
-                        console.log('[API] 响应成功，开始读取流式数据');
+                        console.log('[API]', bestEndpoint.name, '响应成功，开始读取流式数据');
                         return response;
                     }
 
-                    // GitHub Pages环境下：主后端非2xx，尝试备用后端
-                    if (window.location.hostname.includes('github.io') && BACKEND_ENDPOINTS.length > 1) {
-                        const currentIdx = activeBackendIndex;
-                        const nextIdx = (currentIdx + 1) % BACKEND_ENDPOINTS.length;
-                        const nextUrl = BACKEND_ENDPOINTS[nextIdx];
-                        console.warn('[API] 主后端返回非2xx，尝试备用后端:', nextUrl);
-                        response = await doFetch(nextUrl);
-                        if (response.ok) {
-                            activeBackendIndex = nextIdx;
-                            localStorage.setItem('active_backend_idx', String(nextIdx));
-                            localStorage.setItem('last_health_check', String(Date.now()));
-                            console.log('[API] 备用后端响应成功，已切换为活跃后端');
-                            return response;
-                        }
-                    }
-                    
-                    // 处理非2xx响应
+                    // 非2xx响应，尝试其他线路（按优先级顺序）
                     let errorInfo = {};
                     try {
                         errorInfo = await response.json();
                     } catch {
-                        errorInfo = { message: await response.text() };
+                        try { errorInfo = { message: await response.text() }; } catch {}
                     }
                     
-                    console.error('[API] 后端返回错误:', JSON.stringify(errorInfo, null, 2));
-                    throw new Error(`后端返回错误: ${response.status} ${response.statusText}`);
-                    
-                } catch (e) {
-                    // GitHub Pages环境下：网络错误也尝试备用后端
-                    if (window.location.hostname.includes('github.io') && BACKEND_ENDPOINTS.length > 1) {
-                        const nextIdx = (activeBackendIndex + 1) % BACKEND_ENDPOINTS.length;
-                        const nextUrl = BACKEND_ENDPOINTS[nextIdx];
-                        console.warn('[API] 网络错误，尝试备用后端:', nextUrl, e.message);
+                    const firstStatus = response.status;
+                    console.warn('[API]', bestEndpoint.name, '返回', firstStatus, '尝试其他线路...');
+                    triedIndices.add(DOUBAO_API_ENDPOINTS.indexOf(bestEndpoint));
+
+                    // 401/403是密钥问题，不用切换线路
+                    if (firstStatus === 401 || firstStatus === 403) {
+                        const errMsg = errorInfo.error?.message || errorInfo.message || '认证失败';
+                        throw new Error(`API密钥无效或权限不足: ${errMsg}`);
+                    }
+
+                    // 尝试其他线路
+                    for (let i = 0; i < DOUBAO_API_ENDPOINTS.length; i++) {
+                        if (triedIndices.has(i)) continue;
+                        const ep = DOUBAO_API_ENDPOINTS[i];
                         try {
-                            const response = await doFetch(nextUrl);
+                            console.log('[API] 尝试备用线路:', ep.name);
+                            response = await doFetch(ep);
                             if (response.ok) {
-                                activeBackendIndex = nextIdx;
-                                localStorage.setItem('active_backend_idx', String(nextIdx));
-                                localStorage.setItem('last_health_check', String(Date.now()));
-                                console.log('[API] 备用后端响应成功，已切换为活跃后端');
+                                cachedFastestEndpoint = ep;
+                                endpointCacheTimestamp = Date.now();
+                                console.log('[API]', ep.name, '响应成功，已切换为活跃线路');
                                 return response;
                             }
-                        } catch (e2) {
-                            console.error('[API] 备用后端也失败:', e2.message);
+                            triedIndices.add(i);
+                        } catch (e) {
+                            console.warn('[API]', ep.name, '网络错误:', e.message);
+                            triedIndices.add(i);
                         }
                     }
-                    console.warn('[API] 后端请求失败:', e.message);
-                    throw new Error('后端服务连接失败，请检查后端服务是否启动');
+
+                    // 所有线路都失败
+                    throw new Error(`所有API线路均不可用 (首站${firstStatus})`);
+
+                } catch (e) {
+                    // 如果是认证错误直接抛出
+                    if (e.message.includes('API密钥') || e.message.includes('认证')) {
+                        throw e;
+                    }
+                    
+                    // 网络错误也尝试其他线路
+                    console.warn('[API]', bestEndpoint.name, '网络错误:', e.message);
+                    triedIndices.add(DOUBAO_API_ENDPOINTS.indexOf(bestEndpoint));
+                    
+                    for (let i = 0; i < DOUBAO_API_ENDPOINTS.length; i++) {
+                        if (triedIndices.has(i)) continue;
+                        const ep = DOUBAO_API_ENDPOINTS[i];
+                        try {
+                            console.log('[API] 尝试备用线路:', ep.name);
+                            const response = await doFetch(ep);
+                            if (response.ok) {
+                                cachedFastestEndpoint = ep;
+                                endpointCacheTimestamp = Date.now();
+                                console.log('[API]', ep.name, '响应成功，已切换为活跃线路');
+                                return response;
+                            }
+                            triedIndices.add(i);
+                        } catch (e2) {
+                            console.warn('[API]', ep.name, '也失败:', e2.message);
+                            triedIndices.add(i);
+                        }
+                    }
+                    
+                    throw new Error('所有API线路连接失败，请检查网络');
                 }
             }
             

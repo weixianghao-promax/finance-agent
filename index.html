@@ -336,7 +336,8 @@
     </div>
     
     <script>
-        // API 配置已迁移至后端 /api/v1/chat/stream，前端不再硬编码 API Key
+        // 纯前端应用：直接调用豆包API（火山引擎多线路节点）
+        // 所有环境（localhost/GitHub Pages）统一使用前端直连模式
         let chatHistory = loadChatHistory();
         let uploadedFileContent = null;
         let uploadedFileName = null;
@@ -876,11 +877,6 @@
 
         let uploadAuditLog = [];
 
-        // 环境检测：判断当前是本地开发环境还是GitHub Pages
-        const isLocalhost = window.location.hostname === 'localhost' || 
-                           window.location.hostname === '127.0.0.1' || 
-                           window.location.hostname.includes('192.168.');
-        
         // 豆包API直连配置（火山引擎多线路节点）
         // 前端直接调用，减少网络跳数，延迟降低30-50%
         const DOUBAO_API_ENDPOINTS = [
@@ -901,10 +897,6 @@
 
         // 获取当前最优线路（首次请求后台异步测速）
         function getBestEndpoint() {
-            // localhost环境下不使用多线路，直接走后端代理
-            if (isLocalhost) {
-                return { name: '本地代理', url: '/api/v1/chat/stream', priority: 0 };
-            }
             const now = Date.now();
             if (cachedFastestEndpoint && now - endpointCacheTimestamp < ENDPOINT_CACHE_TTL) {
                 return cachedFastestEndpoint;
@@ -917,15 +909,19 @@
             return DOUBAO_API_ENDPOINTS[0];
         }
 
-        // 后台异步测试所有线路延迟（仅在非localhost环境下执行）
+        // 后台异步测试所有线路延迟
         async function testAllEndpoints() {
-            if (isLocalhost) return;
             const pingPromises = DOUBAO_API_ENDPOINTS.map(async (ep) => {
                 const startTime = Date.now();
                 try {
                     const controller = new AbortController();
                     const timeout = setTimeout(() => controller.abort(), 2000);
-                    await fetch(ep.url, { method: 'HEAD', signal: controller.signal });
+                    await fetch(ep.url, { 
+                        method: 'OPTIONS', 
+                        signal: controller.signal,
+                        mode: 'cors',
+                        credentials: 'omit'
+                    });
                     clearTimeout(timeout);
                     return { ...ep, latency: Date.now() - startTime };
                 } catch {
@@ -2089,42 +2085,27 @@
                 const bestEndpoint = getBestEndpoint();
                 console.log('[API] 选用线路:', bestEndpoint.name, bestEndpoint.url);
                 
-                let reqBody, reqHeaders;
-                
-                if (isLocalhost) {
-                    // localhost模式：使用后端代理的请求格式（FastAPI ChatRequest）
-                    const userMessage = messages.find(m => m.role === 'user');
-                    reqBody = JSON.stringify({
-                        message: userMessage?.content || '',
-                        chat_history: [],
-                        file_content: desensitizedFileContent || null,
-                        filename: uploadedFileName || null,
-                        file_desensitized: !!desensitizedFileContent
-                    });
-                    reqHeaders = {
-                        'Content-Type': 'application/json'
-                    };
-                } else {
-                    // GitHub Pages模式：使用OpenAI兼容格式直连豆包API
-                    reqBody = JSON.stringify({
-                        model: DOUBAO_MODEL,
-                        messages: messages,
-                        stream: true,
-                        max_tokens: maxTokens,
-                        temperature: DOUBAO_TEMPERATURE
-                    });
-                    reqHeaders = {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + apiKey
-                    };
-                }
+                // 使用OpenAI兼容格式直连豆包API
+                const reqBody = JSON.stringify({
+                    model: DOUBAO_MODEL,
+                    messages: messages,
+                    stream: true,
+                    max_tokens: maxTokens,
+                    temperature: DOUBAO_TEMPERATURE
+                });
+                const reqHeaders = {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + apiKey
+                };
 
                 async function doFetch(endpoint) {
                     return await fetch(endpoint.url, {
                         method: 'POST',
                         headers: reqHeaders,
                         body: reqBody,
-                        signal: controller.signal
+                        signal: controller.signal,
+                        mode: 'cors',
+                        credentials: 'omit'
                     });
                 }
 
@@ -2146,19 +2127,13 @@
                     const firstStatus = response.status;
                     console.warn('[API]', bestEndpoint.name, '返回', firstStatus, errorInfo.message || '');
 
-                    if (isLocalhost) {
-                        // localhost模式只有一个后端代理，失败后直接抛出错误
-                        const errMsg = errorInfo.detail || errorInfo.message || '后端代理请求失败';
-                        throw new Error(`后端代理请求失败 (${firstStatus}): ${errMsg}`);
-                    }
-
                     // 401/403是密钥问题，不用切换线路
                     if (firstStatus === 401 || firstStatus === 403) {
                         const errMsg = errorInfo.error?.message || errorInfo.message || '认证失败';
                         throw new Error(`API密钥无效或权限不足: ${errMsg}`);
                     }
 
-                    // 尝试其他线路（仅非localhost模式）
+                    // 尝试其他线路（故障转移）
                     let triedIndices = new Set([DOUBAO_API_ENDPOINTS.indexOf(bestEndpoint)]);
                     for (let i = 0; i < DOUBAO_API_ENDPOINTS.length; i++) {
                         if (triedIndices.has(i)) continue;
@@ -2183,14 +2158,9 @@
                     throw new Error(`所有API线路均不可用 (首站${firstStatus})`);
 
                 } catch (e) {
-                    // 如果是认证错误或localhost代理错误直接抛出
-                    if (e.message.includes('API密钥') || e.message.includes('认证') || e.message.includes('后端代理')) {
+                    // 如果是认证错误直接抛出
+                    if (e.message.includes('API密钥') || e.message.includes('认证')) {
                         throw e;
-                    }
-                    
-                    // 网络错误也尝试其他线路（仅非localhost模式）
-                    if (isLocalhost) {
-                        throw new Error('后端代理连接失败，请检查本地服务是否启动');
                     }
                     
                     console.warn('[API]', bestEndpoint.name, '网络错误:', e.message);

@@ -1064,6 +1064,9 @@
         
         async function readPDF(file) {
             try {
+                if (typeof pdfjsLib === 'undefined') {
+                    throw new Error('PDF解析库未加载，请检查网络连接');
+                }
                 const arrayBuffer = await new Promise(function(resolve, reject) {
                     const reader = new FileReader();
                     reader.onload = function(e) { resolve(e.target.result); };
@@ -1071,9 +1074,7 @@
                     reader.readAsArrayBuffer(file);
                 });
                 const data = new Uint8Array(arrayBuffer);
-                if (typeof pdfjsLib !== 'undefined') {
-                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                }
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
                 const doc = await pdfjsLib.getDocument({ data }).promise;
                 let text = '=== PDF文件: ' + file.name + ' ===\n';
                 for (let i = 1; i <= doc.numPages; i++) {
@@ -1085,7 +1086,7 @@
                 return text.trim();
             } catch (e) {
                 console.error('PDF parsing failed:', e);
-                return 'PDF文件内容（解析失败）\n文件名: ' + file.name + '\n大小: ' + file.size + '字节\n提示：请将PDF内容复制为文本后重新上传，或转为Word格式。';
+                return 'PDF文件内容（解析失败）\n文件名: ' + file.name + '\n大小: ' + file.size + '字节\n失败原因: ' + e.message + '\n提示：请将PDF内容复制为文本后重新上传，或转为Word格式。';
             }
         }
         
@@ -1243,6 +1244,9 @@
         
         async function readImage(file) {
             try {
+                if (typeof Tesseract === 'undefined') {
+                    throw new Error('OCR识别库未加载，请检查网络连接');
+                }
                 const compressedFile = await compressImageFile(file, 1000);
                 
                 const { createWorker } = Tesseract;
@@ -1258,7 +1262,7 @@
                 return '=== 图片识别结果: ' + file.name + ' ===\n分类：' + category + '\n\n' + text.trim();
             } catch (e) {
                 console.error('图片识别失败:', e);
-                return '图片文件内容（识别失败）\n文件名: ' + file.name + '\n大小: ' + file.size + '字节\n提示：请手动描述图片内容，或复制图片中的文字重新上传。';
+                return '图片文件内容（识别失败）\n文件名: ' + file.name + '\n大小: ' + file.size + '字节\n失败原因: ' + e.message + '\n提示：请手动描述图片内容，或复制图片中的文字重新上传。';
             }
         }
         
@@ -2022,12 +2026,10 @@
             }
             
             if (!apiKey || !apiKey.startsWith('ark-')) {
-                const defaultKeyParts = ['ark-4638d8d4', '-c224-4b68', '-a9db-c59c', '2cc903e2-648c7'];
-                apiKey = defaultKeyParts.join('');
-                localStorage.setItem('doubao_api_key_encrypted', encryptKey(apiKey));
-                document.getElementById('doubao-api-key').value = apiKey;
-                document.getElementById('api-key-status').textContent = '✓ API密钥已自动配置';
-                document.getElementById('api-key-status').style.color = '#4CAF50';
+                console.warn('[API] 未配置有效API密钥，请在安全设置中配置');
+                showToast('请先在安全设置中配置有效的豆包API密钥', 'error');
+                openSecurityModal();
+                throw new Error('API密钥未配置');
             }
 
             let userContent = safeData || text;
@@ -2307,15 +2309,24 @@
             URL.revokeObjectURL(url);
         }
         
-        function downloadDesensitizedFile() {
+        function downloadDesensitizedFile(fileName) {
+            if (window.desensitizedBlob && window.desensitizedFileName) {
+                const url = URL.createObjectURL(window.desensitizedBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName || window.desensitizedFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                return;
+            }
             if (!uploadedFileContent || !uploadedFileName) {
                 showToast('请先上传文件', 'warning');
                 return;
             }
-            
             const ext = uploadedFileName.split('.').pop().toLowerCase();
-            const downloadFileName = 'desensitized_' + uploadedFileName;
-            
+            const downloadFileName = fileName || 'desensitized_' + uploadedFileName;
             if (['xlsx', 'xls'].includes(ext)) {
                 const lines = uploadedFileContent.split('\n');
                 const data = lines.map(line => line.split('\t'));
@@ -2344,14 +2355,25 @@
             }
         }
         
-        function downloadKeyFile() {
+        function downloadKeyFile(fileName) {
+            if (window.keyBlob && window.keyFileName) {
+                const url = URL.createObjectURL(window.keyBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName || window.keyFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                return;
+            }
             if (!uploadedFileMapping || Object.keys(uploadedFileMapping).length === 0) {
                 showToast('暂无密钥文件可下载', 'warning');
                 return;
             }
-            
             const keyContent = JSON.stringify(uploadedFileMapping, null, 2);
-            downloadFile(keyContent, 'desensitization_keys.json', 'application/json;charset=utf-8');
+            const downloadFileName = fileName || 'desensitization_keys.json';
+            downloadFile(keyContent, downloadFileName, 'application/json;charset=utf-8');
         }
         
         function generateExcelFile(content, autoDownload = false) {
@@ -2712,31 +2734,7 @@
             }
         }
         
-        function downloadDesensitizedFile(fileName) {
-            if (window.desensitizedBlob && window.desensitizedFileName) {
-                const url = URL.createObjectURL(window.desensitizedBlob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = window.desensitizedFileName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }
-        }
-        
-        function downloadKeyFile(fileName) {
-            if (window.keyBlob && window.keyFileName) {
-                const url = URL.createObjectURL(window.keyBlob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = window.keyFileName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }
-        }
+        // 下载函数已在上方统一实现，支持window缓存和原始数据两种模式
         
         function saveCurrentMappingToLocalStorage(reverseMapping) {
             try {
@@ -2960,12 +2958,8 @@
                 return;
             }
             
-            const defaultKeyParts = ['ark-4638d8d4', '-c224-4b68', '-a9db-c59c', '2cc903e2-648c7'];
-            const defaultApiKey = defaultKeyParts.join('');
-            localStorage.setItem('doubao_api_key_encrypted', encryptKey(defaultApiKey));
-            document.getElementById('doubao-api-key').value = defaultApiKey;
-            document.getElementById('api-key-status').textContent = '✓ API密钥已自动配置';
-            document.getElementById('api-key-status').style.color = '#4CAF50';
+            document.getElementById('api-key-status').textContent = '⚠ 请配置您的豆包API密钥';
+            document.getElementById('api-key-status').style.color = '#ff9800';
         }
         
         function sendQuickAction(action) {
@@ -3094,7 +3088,7 @@ ${historySummary}
                 <p>• 日志条数: ${stats.logsCount}</p>
                 <p>• 分类统计:</p>
                 <p>  - 手机号: ${stats.byCategory.phone}</p>
-                <p>  - 身份证: ${stats.byCategory.id}</p>
+                <p>  - 身份证: ${stats.byCategory.idcard}</p>
                 <p>  - 银行账号: ${stats.byCategory.bank}</p>
                 <p>  - 金额: ${stats.byCategory.amount}</p>
                 <p>  - 公司名称: ${stats.byCategory.company}</p>

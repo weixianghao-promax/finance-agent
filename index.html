@@ -7,6 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>港口码头管理方案生成助手</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚢</text></svg>" />
     <!-- 预连接到API端点，减少首次请求延迟 -->
     <link rel="preconnect" href="https://ark.cn-guangzhou.volces.com" crossorigin>
     <link rel="preconnect" href="https://ark.hk-hongkong.volces.com" crossorigin>
@@ -281,11 +282,11 @@
                 <div class="security-section">
                     <h3>🔑 API密钥配置</h3>
                     <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 12px;">请输入您的豆包API密钥，密钥仅保存在浏览器本地，不会上传到云端。</p>
-                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <form style="display: flex; flex-direction: column; gap: 8px;">
                         <input type="password" id="doubao-api-key" placeholder="输入豆包API密钥 (ark-xxx)" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.3); color: white; font-family: monospace;">
-                        <button class="security-btn" onclick="saveApiKey()" style="margin-top: 5px;">💾 保存密钥</button>
-                        <button class="security-btn" onclick="clearApiKey()" style="margin-top: 5px;">🗑️ 清除密钥</button>
-                    </div>
+                        <button type="button" class="security-btn" onclick="saveApiKey()" style="margin-top: 5px;">💾 保存密钥</button>
+                        <button type="button" class="security-btn" onclick="clearApiKey()" style="margin-top: 5px;">🗑️ 清除密钥</button>
+                    </form>
                     <div id="api-key-status" style="margin-top: 10px; font-size: 12px; color: rgba(255,255,255,0.6);"></div>
                 </div>
                 <div class="security-section">
@@ -1412,7 +1413,20 @@
                     const lineSeparator = '\n';
                     
                     while (true) {
-                        const { done, value } = await reader.read();
+                        let readResult;
+                        try {
+                            readResult = await reader.read();
+                        } catch (readError) {
+                            // 处理流读取中断（如超时或用户取消）
+                            if (readError.name === 'AbortError') {
+                                console.warn('[API] 流式读取被中止:', readError.message);
+                                throw new Error('请求超时，请稍后再试');
+                            }
+                            console.error('[API] 流式读取异常:', readError);
+                            throw readError;
+                        }
+                        
+                        const { done, value } = readResult;
                         if (done) break;
                         
                         // 解码数据块

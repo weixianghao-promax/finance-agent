@@ -52,7 +52,7 @@ class DesensitizationProxy {
             encryptionKey: 'desensitization_proxy_key',
             maxLogSize: 100,
             maskStyle: 'placeholder',
-            customRules: []
+            customRules: {}
         };
         this.patterns = [];
         this.loadDefaultPatterns();
